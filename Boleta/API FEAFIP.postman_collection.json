@@ -1,0 +1,184 @@
+{
+	"info": {
+		"_postman_id": "603dd935-3dca-4d28-a551-ef95964b4445",
+		"name": "API FEAFIP",
+		"description": "# Ejemplos de uso de la API FEAFIP para factura electrónica.\n\nEsta colección ejemplifica las siguientes funcionalidades asociadas con la factura electrónica de AFIP.\n\n## Funcionalidades de ejemplo\n\nObtención de CAE y generación de factura\n\nObtención de CAE y generación de nota de crédito\n\nConsulta de comprobantes emitidos",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "450364"
+	},
+	"item": [
+		{
+			"name": "https://api.bitingenieria.com.ar/silex/feafip/fe_ultimo_numero",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"_comentario1_\": \"Ajustar el parametro date a la fecha actual\",\r\n    \"cuit\":20939802593,\r\n    \"tipo_comp\": 6,\r\n    \"pto_vta\": 8\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{API_URL}}/fe_ultimo_numero",
+					"host": [
+						"{{API_URL}}"
+					],
+					"path": [
+						"fe_ultimo_numero"
+					]
+				},
+				"description": "Autorizar factura CAE\n\nSe envia los datos de un comprobante y se obtiene como resultado CAE, Nro y PDF del mismo en formato bae64."
+			},
+			"response": []
+		},
+		{
+			"name": "https://api.bitingenieria.com.ar/silex/feafip/fe_cmp_consultar",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"__parametro_cuit__\": \"cuit de empresa que opera\",\r\n    \"cuit\":20939802593,\r\n    \"__parametro_cuit_consulta__\": \"cuit de empresa a consultar\",\r\n    \"cuit_consulta\": 27929007862\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://api.bitingenieria.com.ar/silex/feafip_prod/fe_consultar_cuit",
+					"protocol": "https",
+					"host": [
+						"api",
+						"bitingenieria",
+						"com",
+						"ar"
+					],
+					"path": [
+						"silex",
+						"feafip_prod",
+						"fe_consultar_cuit"
+					]
+				},
+				"description": "Consulta de comprobantes emitidos.\n\nSe consulta a AFIP el rango de comprobantes requeridos. Se devuelve l ainformación previamente enviada al web service de obtención de CAE"
+			},
+			"response": []
+		},
+		{
+			"name": "https://api.bitingenieria.com.ar/silex/feafip/fe_consultar_cuit",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"__parametro_cuit__\": \"cuit de empresa que opera\",\r\n    \"cuit\":20939802593,\r\n    \"__parametro_cuit_consulta__\": \"cuit de empresa a consultar\",\r\n    \"cuit_consulta\": 27929007862\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://api.bitingenieria.com.ar/silex/feafip_prod/fe_consultar_cuit",
+					"protocol": "https",
+					"host": [
+						"api",
+						"bitingenieria",
+						"com",
+						"ar"
+					],
+					"path": [
+						"silex",
+						"feafip_prod",
+						"fe_consultar_cuit"
+					]
+				},
+				"description": "Consulta de comprobantes emitidos.\n\nSe consulta a AFIP el rango de comprobantes requeridos. Se devuelve l ainformación previamente enviada al web service de obtención de CAE"
+			},
+			"response": []
+		},
+		{
+			"name": "https://api.bitingenieria.com.ar/silex/feafip/fe_autorizar",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"_comentario1_\": \"Ajustar el parametro date a la fecha actual\",\r\n    \"tipo_comp\": 6,\r\n    \"pto_vta\": 8,\r\n    \"date\": \"31/10/2022\",\r\n    \"payment_m\": \"Efectivo\",\r\n    \"company_data\": {\r\n        \"name\": \"MIRANDA CORDOVI ABEL\",\r\n        \"address\": \"ITALIA\",\r\n        \"postal_code\": \"1712\",\r\n        \"city\": \"CASTELAR\",\r\n        \"country\": \"ARGENTINA\",\r\n        \"ident\": \"20939802593\"\r\n    },\r\n    \"customer_data\": {\r\n        \"name\": \"Cliente A\",\r\n        \"address\": \"CALLE 1 123\",\r\n        \"postal_code\": \"1200\",\r\n        \"city\": \"LA PLATA\",\r\n        \"country\": \"ARGENTINA\",\r\n        \"ident\": \"0\",\r\n        \"doc_type\": 99\r\n    },\r\n    \"products\": [\r\n        {\r\n            \"description\": \"ARTICULO IVA 10.5\",\r\n            \"price\": 29.9,\r\n            \"quantity\": 1,\r\n            \"sum_tax\": 0,\r\n            \"total\": 29.9\r\n        }\r\n    ],\r\n    \"base\": {\r\n        \"subtotal\": 24.71,\r\n        \"sum_tax\": 5.19,\r\n        \"total\": 29.9\r\n    },\r\n    \"output\":\"i\",\r\n    \"output_format\":\"t\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{API_URL}}/fe_autorizar",
+					"host": [
+						"{{API_URL}}"
+					],
+					"path": [
+						"fe_autorizar"
+					]
+				},
+				"description": "Obtener el último comprobante emitido\r\n"
+			},
+			"response": []
+		},
+		{
+			"name": "https://api.bitingenieria.com.ar/silex/feafip/fe_pdf",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"_comentario1_\": \"Ajustar el parametro date a la fecha actual\",\r\n    \"tipo_comp\": 6,\r\n    \"pto_vta\": 8,\r\n    \"date\": \"08/06/2023\",\r\n    \"payment_m\": \"Efectivo\",\r\n    \"cae\":\"12345678901234\",\r\n    \"vto\": \"18/06/2023\",\r\n    \"nro\": 2045,\r\n    \"company_data\": {\r\n        \"name\": \"MIRANDA CORDOVI ABEL\",\r\n        \"address\": \"ITALIA\",\r\n        \"postal_code\": \"1712\",\r\n        \"city\": \"CASTELAR\",\r\n        \"country\": \"ARGENTINA\",\r\n        \"ident\": \"20939802593\"\r\n    },\r\n    \"customer_data\": {\r\n        \"name\": \"Cliente A\",\r\n        \"address\": \"CALLE 1 123\",\r\n        \"postal_code\": \"1200\",\r\n        \"city\": \"LA PLATA\",\r\n        \"country\": \"ARGENTINA\",\r\n        \"ident\": \"0\",\r\n        \"doc_type\": 99\r\n    },\r\n    \"products\": [\r\n        {\r\n            \"description\": \"ARTICULO IVA 10.5\",\r\n            \"price\": 29.9,\r\n            \"quantity\": 1,\r\n            \"sum_tax\": 0,\r\n            \"total\": 29.9\r\n        }\r\n    ],\r\n    \"base\": {\r\n        \"subtotal\": 24.71,\r\n        \"sum_tax\": 5.19,\r\n        \"total\": 29.9\r\n    },\r\n    \"output_format\":\"i\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{API_URL}}/fe_pdf",
+					"host": [
+						"{{API_URL}}"
+					],
+					"path": [
+						"fe_pdf"
+					]
+				},
+				"description": "reimpresion de pdf"
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "API_URL",
+			"value": "https://api.bitingenieria.com.ar/silex/feafip"
+		}
+	]
+}

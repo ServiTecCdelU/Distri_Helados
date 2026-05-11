@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(find /c/Users/Emanuel/Desktop/ecritorio/heladeria/components/pedidos -type f -name *.tsx)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(node -e \"const sharp = require\\(''sharp''\\); console.log\\(''sharp available''\\);\")",
+      "Bash(node:*)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(find \"C:\\\\Users\\\\Emanuel\\\\Desktop\\\\ecritorio\\\\heladeria\\\\app\" -name \"page.tsx\" -exec wc -l {} +)",
+      "Bash(winget install:*)",
+      "Bash(curl -s -X POST \"https://distri-helados-mio.vercel.app/api/ventas/emitir\" -H \"Content-Type: application/json\" -d '{\"\"\"\"saleId\"\"\"\":\"\"\"\"test\"\"\"\"}')",
+      "Bash(curl -s http://localhost:3000/dashboard)",
+      "Bash(npm ls:*)",
+      "Bash(npm show:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

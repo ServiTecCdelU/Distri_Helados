@@ -1,0 +1,13 @@
+{
+  "name": "node-domexception",
+  "version": "1.0.0",
+  "description": "Stub: uses native DOMException from Node.js 18+",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "require": "./index.js",
+      "default": "./index.js"
+    }
+  },
+  "license": "MIT"
+}

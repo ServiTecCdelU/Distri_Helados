@@ -1,0 +1,505 @@
+// app/api/facturacion/pdf/[saleId]/route.tsx
+import { NextResponse } from "next/server";
+import { adminAuth, adminFirestore, adminStorage } from "@/lib/firebase-admin";
+import React from "react";
+import {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+  renderToBuffer,
+} from "@react-pdf/renderer";
+
+export const runtime = "nodejs";
+
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 2,
+  }).format(amount);
+
+const formatDate = (date: Date | string | any) => {
+  let d: Date;
+  if (typeof date === "string") d = new Date(date);
+  else if (date?.toDate) d = date.toDate();
+  else d = date;
+  if (!d || isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+};
+
+const getTaxCategoryLabel = (category?: string) => {
+  const categories: Record<string, string> = {
+    responsable_inscripto: "Responsable Inscripto",
+    monotributo: "Monotributo",
+    consumidor_final: "Consumidor Final",
+    exento: "Exento",
+    no_responsable: "No Responsable",
+  };
+  return categories[category || ""] || "Consumidor Final";
+};
+
+const getPaymentTypeLabel = (type: string) => {
+  const types: Record<string, string> = {
+    cash: "Contado",
+    credit: "Cuenta Corriente",
+    mixed: "Contado y Cuenta Corriente",
+  };
+  return types[type] || type;
+};
+
+const styles = StyleSheet.create({
+  page: {
+    padding: "10mm",
+    fontFamily: "Courier",
+    fontSize: 11,
+    lineHeight: 1.4,
+    color: "black",
+    backgroundColor: "white",
+  },
+  header: {
+    flexDirection: "row",
+    borderWidth: 2,
+    borderColor: "black",
+    marginBottom: 16,
+  },
+  headerLeft: {
+    width: "33.33%",
+    padding: 16,
+    borderRightWidth: 2,
+    borderRightColor: "black",
+  },
+  headerCenter: {
+    width: "33.33%",
+    padding: 16,
+    borderRightWidth: 2,
+    borderRightColor: "black",
+    alignItems: "center",
+  },
+  headerRight: {
+    width: "33.33%",
+    padding: 16,
+  },
+  docTypeBox: {
+    border: "2px solid black",
+    width: 64,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 32,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  title: { fontSize: 20, fontWeight: "bold", marginBottom: 8 },
+  subtitle: { fontSize: 18, fontWeight: "bold", marginBottom: 8 },
+  textXs: { fontSize: 9, lineHeight: 1.6 },
+  clientSection: {
+    border: "2px solid black",
+    padding: 16,
+    marginBottom: 16,
+  },
+  gridRow: { flexDirection: "row", marginBottom: 8 },
+  gridCol: { width: "50%" },
+  bold: { fontWeight: "bold" },
+  table: { border: "2px solid black", marginBottom: 16 },
+  tableHeader: {
+    flexDirection: "row",
+    backgroundColor: "#f0f0f0",
+    borderBottomWidth: 1,
+    borderBottomColor: "black",
+    padding: 8,
+    fontWeight: "bold",
+  },
+  tableRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: "black",
+    padding: 8,
+  },
+  tableCell: { fontSize: 10 },
+  colQuantity: { width: "12%", textAlign: "center" },
+  colDescription: { width: "44%" },
+  colPrice: { width: "15%", textAlign: "right" },
+  colIva: { width: "12%", textAlign: "right" },
+  colSubtotal: { width: "17%", textAlign: "right" },
+  totalsSection: {
+    border: "2px solid black",
+    padding: 16,
+    marginBottom: 16,
+  },
+  totalsBox: { width: "60%", marginLeft: "auto" },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  totalRowBold: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    fontWeight: "bold",
+    fontSize: 18,
+    borderTopWidth: 1,
+    borderTopColor: "black",
+    paddingTop: 8,
+    marginTop: 4,
+  },
+  caeSection: {
+    border: "2px solid black",
+    padding: 16,
+    marginBottom: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  warningBox: {
+    border: "2px solid black",
+    padding: 16,
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  textRed: { color: "#dc2626", fontWeight: "bold" },
+  textGray: { color: "#6b7280", fontSize: 9 },
+  footer: {
+    marginTop: 16,
+    textAlign: "center",
+    fontSize: 9,
+    color: "#6b7280",
+  },
+  textCenter: { textAlign: "center" },
+});
+
+interface InvoicePDFProps {
+  sale: any;
+  clientData: any;
+  isElectronica: boolean;
+}
+
+function InvoicePDF({ sale, clientData, isElectronica }: InvoicePDFProps) {
+  const items: any[] = sale.items || [];
+  const emptyRows = Math.max(0, 10 - items.length);
+
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.title}>DOMINGUEZ MARIO CESAR</Text>
+            <Text style={styles.textXs}>
+              {"Razon Social: DOMINGUEZ MARIO CESAR\n"}
+              {"Domicilio Comercial: Dr. Bastian 1049\n"}
+              {"Localidad: San Jose (3283)\n"}
+              {"Condicion frente al IVA: Responsable Inscripto"}
+            </Text>
+          </View>
+          <View style={styles.headerCenter}>
+            <View style={styles.docTypeBox}>
+              <Text>{isElectronica ? "B" : "X"}</Text>
+            </View>
+            <Text style={[styles.textXs, styles.textCenter]}>
+              {isElectronica
+                ? "Codigo 006\nFACTURA"
+                : "Documento No Valido como Factura\nPRESUPUESTO"}
+            </Text>
+          </View>
+          <View style={styles.headerRight}>
+            <Text style={styles.subtitle}>
+              {"Punto de Venta: "}
+              {sale.invoiceNumber?.split("-")[0] || "0001"}
+              {"\nComp. Nro: "}
+              {sale.invoiceNumber?.split("-")[1] ||
+                sale.invoiceNumber ||
+                "00000000"}
+            </Text>
+            <Text style={styles.textXs}>
+              {"Fecha de Emision: "}
+              {formatDate(sale.createdAt || new Date())}
+              {
+                "\nCUIT: 20-14598383-6\nIngresos Brutos: 20145983836\nInicio de Actividades: 01/01/2020"
+              }
+            </Text>
+          </View>
+        </View>
+
+        {/* Client Info */}
+        <View style={styles.clientSection}>
+          <View style={styles.gridRow}>
+            <View style={styles.gridCol}>
+              <Text style={styles.tableCell}>
+                <Text style={styles.bold}>{"CUIT: "}</Text>
+                {clientData.cuit || sale.clientCuit || "00-00000000-0"}
+              </Text>
+              <Text style={styles.tableCell}>
+                <Text style={styles.bold}>{"Condicion frente al IVA: "}</Text>
+                {getTaxCategoryLabel(
+                  clientData.taxCategory || sale.clientTaxCategory,
+                )}
+              </Text>
+            </View>
+            <View style={styles.gridCol}>
+              <Text style={[styles.tableCell, styles.bold]}>
+                {"Apellido y Nombre / Razon Social:"}
+              </Text>
+              <Text style={styles.tableCell}>
+                {sale.clientName || clientData.name || "Consumidor Final"}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.gridRow, { marginTop: 8 }]}>
+            <View style={styles.gridCol}>
+              <Text style={styles.tableCell}>
+                <Text style={styles.bold}>{"Domicilio: "}</Text>
+                {clientData.address || sale.clientAddress || "-"}
+              </Text>
+            </View>
+            <View style={styles.gridCol}>
+              <Text style={styles.tableCell}>
+                <Text style={styles.bold}>{"Condicion de venta: "}</Text>
+                {getPaymentTypeLabel(sale.paymentType || "cash")}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Items Table */}
+        <View style={styles.table}>
+          <View style={styles.tableHeader}>
+            <Text style={[styles.tableCell, styles.colQuantity]}>
+              {"Cantidad"}
+            </Text>
+            <Text style={[styles.tableCell, styles.colDescription]}>
+              {"Descripcion"}
+            </Text>
+            <Text style={[styles.tableCell, styles.colPrice]}>
+              {"Precio Unit."}
+            </Text>
+            <Text style={[styles.tableCell, styles.colIva]}>{"% IVA"}</Text>
+            <Text style={[styles.tableCell, styles.colSubtotal]}>
+              {"Subtotal"}
+            </Text>
+          </View>
+          {items.map((item: any, index: number) => (
+            <View key={index} style={styles.tableRow}>
+              <Text style={[styles.tableCell, styles.colQuantity]}>
+                {String(item.quantity)}
+              </Text>
+              <Text style={[styles.tableCell, styles.colDescription]}>
+                {String(item.name)}
+              </Text>
+              <Text style={[styles.tableCell, styles.colPrice]}>
+                {formatCurrency(item.price)}
+              </Text>
+              <Text style={[styles.tableCell, styles.colIva]}>{"21.00"}</Text>
+              <Text style={[styles.tableCell, styles.colSubtotal]}>
+                {formatCurrency(item.price * item.quantity)}
+              </Text>
+            </View>
+          ))}
+          {Array.from({ length: emptyRows }).map((_, index) => (
+            <View key={`empty-${index}`} style={styles.tableRow}>
+              <Text style={[styles.tableCell, styles.colQuantity]}> </Text>
+              <Text style={[styles.tableCell, styles.colDescription]}> </Text>
+              <Text style={[styles.tableCell, styles.colPrice]}> </Text>
+              <Text style={[styles.tableCell, styles.colIva]}> </Text>
+              <Text style={[styles.tableCell, styles.colSubtotal]}> </Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Totals */}
+        <View style={styles.totalsSection}>
+          <View style={styles.totalsBox}>
+            <View style={styles.totalRow}>
+              <Text>{"Subtotal:"}</Text>
+              <Text>{formatCurrency((sale.total || 0) / 1.21)}</Text>
+            </View>
+            <View style={styles.totalRow}>
+              <Text>{"IVA 21%:"}</Text>
+              <Text>
+                {formatCurrency((sale.total || 0) - (sale.total || 0) / 1.21)}
+              </Text>
+            </View>
+            <View style={styles.totalRowBold}>
+              <Text>{"TOTAL:"}</Text>
+              <Text>{formatCurrency(sale.total || 0)}</Text>
+            </View>
+            {sale.paymentType === "mixed" && (
+              <View
+                style={{
+                  marginTop: 8,
+                  paddingTop: 8,
+                  borderTopWidth: 1,
+                  borderTopColor: "black",
+                }}
+              >
+                <View style={styles.totalRow}>
+                  <Text style={styles.textXs}>{"Efectivo:"}</Text>
+                  <Text style={styles.textXs}>
+                    {formatCurrency(sale.cashAmount || 0)}
+                  </Text>
+                </View>
+                <View style={styles.totalRow}>
+                  <Text style={styles.textXs}>{"A Cuenta:"}</Text>
+                  <Text style={styles.textXs}>
+                    {formatCurrency(sale.creditAmount || 0)}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* CAE or Warning */}
+        {isElectronica ? (
+          <View style={styles.caeSection}>
+            <View>
+              <Text style={styles.textXs}>
+                <Text style={styles.bold}>{"CAE N: "}</Text>
+                {sale.afipData?.cae || "N/A"}
+              </Text>
+              <Text style={styles.textXs}>
+                <Text style={styles.bold}>{"Fecha de Vto. de CAE: "}</Text>
+                {sale.afipData?.caeVencimiento
+                  ? formatDate(sale.afipData.caeVencimiento)
+                  : "-"}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.warningBox}>
+            <Text style={styles.textRed}>
+              {"DOCUMENTO NO VALIDO COMO FACTURA"}
+            </Text>
+            <Text style={styles.textGray}>
+              {
+                "Este documento es un presupuesto. Solicite factura electronica si la requiere."
+              }
+            </Text>
+          </View>
+        )}
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          {isElectronica ? (
+            <Text>
+              {"Comprobante autorizado por AFIP\n"}
+              {"Esta factura contribuye al desarrollo del pais."}
+            </Text>
+          ) : (
+            <Text>{"Documento interno - No valido fiscalmente"}</Text>
+          )}
+        </View>
+      </Page>
+    </Document>
+  );
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ saleId: string }> },
+) {
+  try {
+    const authHeader = request.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        await adminAuth.verifyIdToken(authHeader.replace("Bearer ", ""));
+      } catch {
+        console.log("Auth fallo, permitiendo en modo desarrollo");
+      }
+    }
+
+    const { saleId } = await context.params;
+    console.log("Generando PDF para venta:", saleId);
+
+    const bucket = adminStorage.bucket();
+    const filePath = `facturas/${saleId}.pdf`;
+    const file = bucket.file(filePath);
+
+    try {
+      const [exists] = await file.exists();
+      if (exists) {
+        const [url] = await file.getSignedUrl({
+          action: "read",
+          expires: Date.now() + 60 * 60 * 1000,
+        });
+        return NextResponse.redirect(url);
+      }
+    } catch {
+      console.log("No se pudo verificar Storage, generando nuevo PDF...");
+    }
+
+    const saleSnapshot = await adminFirestore
+      .collection("ventas")
+      .doc(saleId)
+      .get();
+    if (!saleSnapshot.exists) {
+      return NextResponse.json(
+        { error: "Venta no encontrada" },
+        { status: 404 },
+      );
+    }
+
+    const sale = saleSnapshot.data() || {};
+
+    let clientData: any = {};
+    if (sale.clientId) {
+      const clientSnapshot = await adminFirestore
+        .collection("clientes")
+        .doc(sale.clientId)
+        .get();
+      if (clientSnapshot.exists) {
+        clientData = clientSnapshot.data();
+      }
+    }
+
+    const isElectronica = !!sale.afipData?.cae;
+
+    // renderToBuffer funciona server-side con Node.js
+    const pdfBuffer = await renderToBuffer(
+      <InvoicePDF
+        sale={sale}
+        clientData={clientData}
+        isElectronica={isElectronica}
+      />,
+    );
+
+    console.log("PDF generado, tamano:", pdfBuffer.length, "bytes");
+
+    await file.save(pdfBuffer, {
+      metadata: {
+        contentType: "application/pdf",
+        metadata: {
+          saleId,
+          invoiceNumber: sale.invoiceNumber || "",
+          generatedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
+    await adminFirestore.collection("ventas").doc(saleId).update({
+      invoicePdfUrl: publicUrl,
+      invoicePdfGeneratedAt: new Date().toISOString(),
+    });
+
+    // Convertir Buffer a Uint8Array para NextResponse
+    const uint8Array = new Uint8Array(pdfBuffer);
+
+    return new NextResponse(uint8Array, {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="factura-${sale.invoiceNumber || saleId}.pdf"`,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error generando PDF:", error);
+    return NextResponse.json(
+      { error: error.message || "Error generando PDF" },
+      { status: 500 },
+    );
+  }
+}
