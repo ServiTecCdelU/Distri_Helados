@@ -191,7 +191,8 @@ export const createOrder = async (data: {
     item_discount: item.itemDiscount ?? null,
   }))
   if (itemRows.length > 0) {
-    await supabase.from('pedido_items').insert(itemRows)
+    const { error: itemsError } = await supabase.from('pedido_items').insert(itemRows)
+    if (itemsError) throw itemsError
   }
 
   // Guardar dirección en la libreta del cliente

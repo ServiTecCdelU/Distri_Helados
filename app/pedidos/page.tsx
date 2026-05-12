@@ -147,7 +147,7 @@ export default function PedidosPage() {
       setSellers(sellersData);
     } catch (error) {
       if (isMounted && !isMounted()) return;
-      // Error silenciado
+      console.error("[pedidos] Error cargando datos:", error);
     } finally {
       if (isMounted && !isMounted()) return;
       setLoading(false);
@@ -380,7 +380,11 @@ export default function PedidosPage() {
     let active = true;
     setMounted(true);
     loadData(() => active);
-    return () => { active = false; };
+
+    // Refrescar datos al volver a la pestaña (ej: después de crear pedido desde carrito)
+    const onFocus = () => { loadData(); };
+    window.addEventListener('focus', onFocus);
+    return () => { active = false; window.removeEventListener('focus', onFocus); };
   }, [loadData]);
 
   useEffect(() => {
