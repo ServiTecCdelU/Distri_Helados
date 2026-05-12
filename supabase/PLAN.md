@@ -13,7 +13,7 @@
 | 2 | Migración de datos | ✅ COMPLETADA |
 | 3 | Auth (archivos nuevos) | ✅ COMPLETADA |
 | 4 | Servicios de datos | ✅ COMPLETADA |
-| 5 | Hooks y uso directo Firestore | ⬜ PENDIENTE |
+| 5 | Hooks y uso directo Firestore | ✅ COMPLETADA |
 | 6 | API Routes | ⬜ PENDIENTE |
 | 7 | Storage (PDFs) | ⬜ PENDIENTE |
 | 8 | Switch (reemplazar imports) | ⬜ PENDIENTE |
@@ -201,14 +201,20 @@ etc.
 
 ---
 
-## Fase 5: Hooks ⬜ PENDIENTE
+## Fase 5: Hooks ✅ COMPLETADA
 
-**`hooks/useVentas.ts`** — El hook más complejo, tiene acceso directo a Firestore.
-- Crear `hooks/useVentas-supabase.ts`
-- Reemplazar imports de `firebase/firestore` y `@/lib/firebase`
-- Queries con `supabase.from('ventas').select('*, venta_items(*)')`
+**Archivo creado:** `hooks/useVentas-supabase.ts`
 
-**`hooks/useCart.ts`** — No tiene acceso directo a Firestore, usa `lib/api.ts`. Sin cambios directos.
+Cambios clave vs Firebase:
+- `cargarVentas` usa `supabase.from('ventas').select('*, venta_items(*), venta_afip_data(*)')` con JOIN
+- `mapVentaRow()` convierte snake_case → camelCase y reconstruye items/afipData desde relaciones
+- Auth token via `supabase.auth.getSession()` en vez de `getAuth().currentUser.getIdToken()`
+- Updates con `supabase.from('ventas').update({...}).eq('id', id)`
+- AFIP data se guarda en `venta_afip_data` con upsert (tabla separada)
+- Remito number query usa `supabase.from('ventas')` con `.not('remito_number', 'is', null)`
+- `resolverTelefono` y `fetchClientData` usan `supabase.from('clientes')`
+
+**`hooks/useCart.ts`** — No tiene acceso directo a Firestore, usa `lib/api.ts`. Sin cambios necesarios.
 
 ---
 
