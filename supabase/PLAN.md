@@ -14,7 +14,7 @@
 | 3 | Auth (archivos nuevos) | ✅ COMPLETADA |
 | 4 | Servicios de datos | ✅ COMPLETADA |
 | 5 | Hooks y uso directo Firestore | ✅ COMPLETADA |
-| 6 | API Routes | ⬜ PENDIENTE |
+| 6 | API Routes (preparación) | ✅ COMPLETADA |
 | 7 | Storage (PDFs) | ⬜ PENDIENTE |
 | 8 | Switch (reemplazar imports) | ⬜ PENDIENTE |
 | 9 | Cleanup (borrar Firebase) | ⬜ PENDIENTE |
@@ -218,20 +218,43 @@ Cambios clave vs Firebase:
 
 ---
 
-## Fase 6: API Routes ⬜ PENDIENTE
+## Fase 6: API Routes (preparación) ✅ COMPLETADA
 
-Reemplazar `adminFirestore` y `adminAuth` por `supabaseAdmin` y `verifyAuthToken`.
+**Archivo creado:** `lib/facturacion-helper-supabase.ts`
+- Reemplaza `adminFirestore` por `supabaseAdmin`
+- Lee venta con JOIN `venta_items(*)`
+- Usa `client.tax_category` (snake_case) vs `clientData.taxCategory`
+- Guarda AFIP data en `venta_afip_data` (tabla separada, upsert)
+- Parámetro renombrado: `collectionName` → `tableName`
 
-**Rutas protegidas (11 archivos):** Cambiar `adminAuth.verifyIdToken` → `verifyAuthToken(request)` de `lib/supabase-auth-helper.ts`
+**Las API routes se modificarán directamente en Fase 8** (no se pueden crear archivos paralelos para rutas).
 
-**Rutas públicas (5 archivos):** Cambiar `adminFirestore.collection(...)` → `supabaseAdmin.from(...)`
-- `app/api/public/productos/route.ts`
-- `app/api/public/clientes/route.ts`
-- `app/api/public/vendedores/route.ts`
-- `app/api/public/pedidos/route.ts`
-- `app/api/public/mas-vendidos/route.ts`
+### Cambios necesarios por ruta (referencia para Fase 8):
 
-**`lib/facturacion-helper.ts`** — Cambiar `adminFirestore` por `supabaseAdmin` (lógica AFIP no cambia)
+**Rutas protegidas (auth: `adminAuth.verifyIdToken` → `verifyAuthToken`):**
+1. `api/ventas/emitir` — solo auth + import facturacion-helper
+2. `api/facturacion` — solo auth + import facturacion-helper
+3. `api/facturacion/comprobantes` — solo auth (no usa Firestore)
+4. `api/facturacion/consultar-cuit` — solo auth (no usa Firestore)
+5. `api/facturacion/reimprimir` — auth + `adminFirestore` → `supabaseAdmin` (lee venta, actualiza PDF)
+6. `api/facturacion/pdf/[saleId]` — auth + `adminFirestore` → `supabaseAdmin` + `adminStorage` → Supabase Storage
+7. `api/drive` — solo auth (no usa Firestore)
+8. `api/afip/test` — solo auth (no usa Firestore)
+9. `api/afip/cuit` — solo auth (no usa Firestore)
+10. `api/remitos` — auth + `adminFirestore` → `supabaseAdmin` (lee/escribe ventas)
+
+**Rutas públicas (`adminFirestore` → `supabaseAdmin`):**
+1. `api/public/productos` — query simple
+2. `api/public/clientes` — búsqueda por DNI/CUIT/query libre
+3. `api/public/vendedores` — búsqueda por email
+4. `api/public/pedidos` — crear pedido + cliente (más complejo)
+5. `api/public/mas-vendidos` — JOIN optimizado con venta_items
+
+**Ruta con Firebase client SDK (no admin):**
+1. `api/register-debt` — usa `firestore` client + `firestore-helpers` → `supabaseAdmin`
+
+**Ruta de transacciones:**
+1. `api/public/clientes/[id]/transactions` — query simple
 
 ---
 
