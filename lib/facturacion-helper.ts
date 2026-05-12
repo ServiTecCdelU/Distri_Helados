@@ -63,10 +63,11 @@ export async function procesarEmision(
   emitirAfip?: boolean,
   tableName: string = "ventas",
 ): Promise<EmitirResult> {
-  // Leer venta con items
+  // Leer venta/pedido con items (tabla de items depende del origen)
+  const itemsRelation = tableName === 'pedidos' ? 'pedido_items(*)' : 'venta_items(*)';
   const { data: sale, error: saleError } = await supabaseAdmin
     .from(tableName)
-    .select('*, venta_items(*)')
+    .select(`*, ${itemsRelation}`)
     .eq('id', saleId)
     .single();
 
@@ -112,9 +113,10 @@ export async function procesarEmision(
 
   if (emitirAfip) {
     // Calcular total si no viene en el documento
+    const items = sale.venta_items || sale.pedido_items || [];
     let importeTotal = sale.total || 0;
-    if (!importeTotal && Array.isArray(sale.venta_items)) {
-      importeTotal = sale.venta_items.reduce(
+    if (!importeTotal && Array.isArray(items)) {
+      importeTotal = items.reduce(
         (acc: number, it: any) =>
           acc + (Number(it.price) || 0) * (Number(it.quantity) || 0),
         0,
