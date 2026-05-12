@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 import type { CartItem, Sale } from '@/lib/types'
 import { generateReadableId } from '@/services/supabase-helpers'
 
-const COMMISSION_RATE = 0.1
+const DEFAULT_COMMISSION_RATE = 0.1
 
 function mapSale(r: any): Sale {
   // Reconstruir items desde venta_items si están disponibles
@@ -114,6 +114,8 @@ export const processSale = async (data: {
   clientPhone?: string
   sellerId?: string
   sellerName?: string
+  transportistaId?: string
+  transportistaName?: string
   items: CartItem[]
   paymentType: 'cash' | 'credit' | 'mixed'
   paymentMethod?: 'efectivo' | 'transferencia'
@@ -284,7 +286,13 @@ export const processSale = async (data: {
 
   // Comisión para vendedor
   if (data.sellerId) {
-    const commissionAmount = total * COMMISSION_RATE
+    const { data: seller } = await supabase
+      .from('vendedores')
+      .select('commission_rate, total_sales, total_commission')
+      .eq('id', data.sellerId)
+      .single()
+    const rate = seller?.commission_rate != null ? seller.commission_rate / 100 : DEFAULT_COMMISSION_RATE
+    const commissionAmount = total * rate
     const now = new Date()
     const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
     const commissionId = await generateReadableId(
@@ -297,17 +305,11 @@ export const processSale = async (data: {
       sale_number: saleNumber,
       client_name: clientName || null,
       sale_total: total,
-      commission_rate: COMMISSION_RATE * 100,
+      commission_rate: rate * 100,
       commission_amount: commissionAmount,
       is_paid: false,
     })
 
-    // Actualizar totales del vendedor
-    const { data: seller } = await supabase
-      .from('vendedores')
-      .select('total_sales, total_commission')
-      .eq('id', data.sellerId)
-      .single()
     if (seller) {
       await supabase
         .from('vendedores')
@@ -316,6 +318,43 @@ export const processSale = async (data: {
           total_commission: (seller.total_commission || 0) + commissionAmount,
         })
         .eq('id', data.sellerId)
+    }
+  }
+
+  // Comisión para transportista (solo en pedidos delivery)
+  if (data.transportistaId && data.transportistaId !== data.sellerId) {
+    const { data: transportista } = await supabase
+      .from('vendedores')
+      .select('transportista_commission_rate, total_sales, total_commission')
+      .eq('id', data.transportistaId)
+      .single()
+    const tRate = transportista?.transportista_commission_rate != null ? transportista.transportista_commission_rate / 100 : DEFAULT_COMMISSION_RATE
+    const tCommission = total * tRate
+    const now = new Date()
+    const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+    const tCommissionId = await generateReadableId(
+      'comisiones', 'comision', `${data.transportistaName || 'transportista'}_${yyyymm}`
+    )
+    await supabase.from('comisiones').insert({
+      id: tCommissionId,
+      seller_id: data.transportistaId,
+      sale_id: saleId,
+      sale_number: saleNumber,
+      client_name: clientName || null,
+      sale_total: total,
+      commission_rate: tRate * 100,
+      commission_amount: tCommission,
+      is_paid: false,
+    })
+
+    if (transportista) {
+      await supabase
+        .from('vendedores')
+        .update({
+          total_sales: (transportista.total_sales || 0) + total,
+          total_commission: (transportista.total_commission || 0) + tCommission,
+        })
+        .eq('id', data.transportistaId)
     }
   }
 

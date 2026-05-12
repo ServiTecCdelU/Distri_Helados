@@ -144,3 +144,26 @@ export const payAllCommissions = async (sellerId: string): Promise<void> => {
     .eq('is_paid', false)
   if (error) throw error
 }
+
+export const resetCommissions = async (sellerId: string): Promise<void> => {
+  // Marcar todas como pagadas
+  await supabase
+    .from('comisiones')
+    .update({ is_paid: true, paid_at: new Date().toISOString() })
+    .eq('seller_id', sellerId)
+    .eq('is_paid', false)
+
+  // Eliminar todas las comisiones del empleado
+  const { error: delError } = await supabase
+    .from('comisiones')
+    .delete()
+    .eq('seller_id', sellerId)
+  if (delError) throw delError
+
+  // Resetear contadores del vendedor
+  const { error } = await supabase
+    .from('vendedores')
+    .update({ total_sales: 0, total_commission: 0 })
+    .eq('id', sellerId)
+  if (error) throw error
+}

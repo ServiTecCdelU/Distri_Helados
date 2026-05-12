@@ -458,8 +458,10 @@ export default function PedidosPage() {
         clientId: resolvedClientId,
         clientName: client?.name || selectedOrder.clientName,
         clientPhone: client?.phone,
-        sellerId: selectedOrder.sellerId, // ✅ agregar esta línea
-        sellerName: selectedOrder.sellerName, // ✅ agregar esta línea
+        sellerId: selectedOrder.sellerId,
+        sellerName: selectedOrder.sellerName,
+        transportistaId: selectedOrder.transportistaId,
+        transportistaName: selectedOrder.transportistaName,
         items: selectedOrder.items.map((item) => ({
           product: {
             id: item.productId,

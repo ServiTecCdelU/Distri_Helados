@@ -48,6 +48,7 @@ import {
   Loader2,
   Truck,
   ShoppingCart,
+  RotateCcw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -81,6 +82,7 @@ export default function EmpleadosPage() {
   const [loadingCommissions, setLoadingCommissions] = useState(false)
   const [payingCommission, setPayingCommission] = useState<string | null>(null)
   const [payingAll, setPayingAll] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -260,10 +262,24 @@ export default function EmpleadosPage() {
       await loadSellers()
       toast.success('Todas las comisiones fueron pagadas')
     } catch (error) {
-      // Error silenciado
       toast.error('Error al pagar comisiones')
     } finally {
       setPayingAll(false)
+    }
+  }
+
+  const handleResetCommissions = async () => {
+    if (!selectedSeller) return
+    setResetting(true)
+    try {
+      await sellersApi.resetCommissions(selectedSeller.id)
+      setCommissions([])
+      await loadSellers()
+      toast.success('Contabilidad reseteada — comisiones pagadas y contadores en cero')
+    } catch (error) {
+      toast.error('Error al resetear comisiones')
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -961,23 +977,41 @@ export default function EmpleadosPage() {
 
               {/* Commissions List */}
               <div>
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-3 gap-2">
                   <h4 className="font-semibold text-foreground">Historial de Comisiones</h4>
-                  {pendingCommissions.length > 0 && (
-                    <Button
-                      size="sm"
-                      onClick={handlePayAllCommissions}
-                      disabled={payingAll}
-                      className="gap-2"
-                    >
-                      {payingAll ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Banknote className="h-4 w-4" />
-                      )}
-                      Pagar Todas ({pendingCommissions.length})
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {pendingCommissions.length > 0 && (
+                      <Button
+                        size="sm"
+                        onClick={handlePayAllCommissions}
+                        disabled={payingAll || resetting}
+                        className="gap-2"
+                      >
+                        {payingAll ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Banknote className="h-4 w-4" />
+                        )}
+                        Pagar Todas ({pendingCommissions.length})
+                      </Button>
+                    )}
+                    {commissions.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleResetCommissions}
+                        disabled={resetting || payingAll}
+                        className="gap-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+                      >
+                        {resetting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RotateCcw className="h-4 w-4" />
+                        )}
+                        Resetear
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {loadingCommissions ? (
