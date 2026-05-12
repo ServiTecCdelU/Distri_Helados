@@ -995,22 +995,20 @@ export default function EmpleadosPage() {
                         Pagar Todas ({pendingCommissions.length})
                       </Button>
                     )}
-                    {commissions.length > 0 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleResetCommissions}
-                        disabled={resetting || payingAll}
-                        className="gap-2 text-rose-600 border-rose-200 hover:bg-rose-50"
-                      >
-                        {resetting ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RotateCcw className="h-4 w-4" />
-                        )}
-                        Resetear
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleResetCommissions}
+                      disabled={resetting || payingAll}
+                      className="gap-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+                    >
+                      {resetting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-4 w-4" />
+                      )}
+                      Resetear
+                    </Button>
                   </div>
                 </div>
 
