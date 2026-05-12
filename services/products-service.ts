@@ -20,11 +20,12 @@ function mapRow(r: any): Product {
   }
 }
 
-export const getProducts = async (): Promise<Product[]> => {
+export const getProducts = async (limit: number = 500): Promise<Product[]> => {
   const { data, error } = await supabase
     .from('productos')
-    .select('*')
+    .select('id, name, description, price, stock, image_url, category, base, marca, sin_tacc, disabled, created_at')
     .order('created_at', { ascending: false })
+    .limit(limit)
   if (error) throw error
   return (data || []).map(mapRow)
 }

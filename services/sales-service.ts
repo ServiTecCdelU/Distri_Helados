@@ -58,11 +58,12 @@ function mapSale(r: any): Sale {
   }
 }
 
-export const getSales = async (): Promise<Sale[]> => {
+export const getSales = async (limit: number = 200): Promise<Sale[]> => {
   const { data, error } = await supabase
     .from('ventas')
     .select('*, venta_items(*)')
     .order('created_at', { ascending: false })
+    .limit(limit)
   if (error) throw error
   return (data || []).map(mapSale)
 }
