@@ -45,10 +45,11 @@ function mapRowSimple(r: any): Client {
 export const getClients = async (): Promise<Client[]> => {
   const { data, error } = await supabase
     .from('clientes')
-    .select('*, cliente_direcciones(*)')
+    .select('id, name, dni, cuit, email, phone, address, tax_category, credit_limit, current_balance, notes, created_at')
     .order('created_at', { ascending: false })
+    .limit(300)
   if (error) throw error
-  return (data || []).map(mapRow)
+  return (data || []).map(mapRowSimple)
 }
 
 export const getClientById = async (id: string): Promise<Client | undefined> => {

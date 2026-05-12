@@ -74,6 +74,7 @@ export const getSalesBySeller = async (sellerId: string): Promise<Sale[]> => {
     .select('*, venta_items(*)')
     .eq('seller_id', sellerId)
     .order('created_at', { ascending: false })
+    .limit(200)
   if (error) throw error
   return (data || []).map(mapSale)
 }
@@ -84,6 +85,7 @@ export const getSalesByClient = async (clientId: string): Promise<Sale[]> => {
     .select('*, venta_items(*)')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
+    .limit(100)
   if (error) throw error
   return (data || []).map(mapSale)
 }

@@ -168,9 +168,10 @@ export const getProductDistribution = async () => {
 export const getLowStockProducts = async (): Promise<Product[]> => {
   const { data } = await supabase
     .from('productos')
-    .select('*')
+    .select('id, name, description, price, stock, image_url, category, created_at')
     .lt('stock', 10)
     .order('stock', { ascending: true })
+    .limit(20)
 
   return (data || []).map(r => ({
     id: r.id,
@@ -187,9 +188,10 @@ export const getLowStockProducts = async (): Promise<Product[]> => {
 export const getDebtors = async (): Promise<Client[]> => {
   const { data } = await supabase
     .from('clientes')
-    .select('*')
+    .select('id, name, dni, cuit, email, phone, address, tax_category, credit_limit, current_balance, notes, created_at')
     .gt('current_balance', 0)
     .order('current_balance', { ascending: false })
+    .limit(50)
 
   return (data || []).map(r => ({
     id: r.id,

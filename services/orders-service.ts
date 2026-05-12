@@ -49,6 +49,7 @@ export const getOrders = async (): Promise<Order[]> => {
     .from('pedidos')
     .select(SELECT_WITH_ITEMS)
     .order('created_at', { ascending: false })
+    .limit(200)
   if (error) throw error
   return (data || []).map(mapOrder)
 }
@@ -59,6 +60,7 @@ export const getOrdersByTransportista = async (transportistaId: string): Promise
     .select(SELECT_WITH_ITEMS)
     .eq('transportista_id', transportistaId)
     .order('created_at', { ascending: false })
+    .limit(100)
   if (error) throw error
   return (data || []).map(mapOrder)
 }
