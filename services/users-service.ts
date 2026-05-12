@@ -54,7 +54,26 @@ export const ensureUserProfile = async (data: {
   const matchingSeller = sellerMatch?.id ?? null
   const matchingEmployeeType = sellerMatch?.employee_type as EmployeeType | undefined
 
-  const existing = await getUserProfile(data.id)
+  let existing = await getUserProfile(data.id)
+
+  // Fallback: buscar por email (usuarios migrados de Firebase sin auth_uid)
+  if (!existing && data.email) {
+    const { data: byEmail } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('email', data.email)
+      .limit(1)
+      .single()
+
+    if (byEmail) {
+      // Vincular auth_uid al registro existente
+      await supabase
+        .from('usuarios')
+        .update({ auth_uid: data.id })
+        .eq('id', byEmail.id)
+      existing = mapRow(byEmail)
+    }
+  }
 
   if (existing) {
     // Si existe perfil pero no es seller/admin y hay vendedor vinculado, actualizar
