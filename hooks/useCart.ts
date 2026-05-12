@@ -781,7 +781,8 @@ export function useCart(role: UserRole, userEmail?: string) {
           discountType: discountValue > 0 ? discountType : undefined,
         });
         toast.success("Pedido creado correctamente");
-        resetCart();
+        setCart([]);
+        if (typeof window !== 'undefined') localStorage.removeItem('cart-items');
         return "order";
       } else {
         const overpayment =

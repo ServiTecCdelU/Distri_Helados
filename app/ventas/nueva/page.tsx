@@ -125,8 +125,8 @@ function NuevaVentaContent({
     const result = await actions.processSale();
     setConfirmDialogOpen(false);
     if (result === "order") {
-      // Transportistas y "ambos" tienen acceso a pedidos; vendedores puros no
-      const canSeePedidos = employeeType === "transportista" || employeeType === "ambos";
+      // Admin siempre ve pedidos; sellers solo si son transportista/ambos
+      const canSeePedidos = cartRole === "admin" || employeeType === "transportista" || employeeType === "ambos";
       router.push(canSeePedidos ? "/pedidos" : "/ventas");
     }
   };
