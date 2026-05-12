@@ -1,42 +1,40 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  increment,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from 'firebase/firestore'
-import { firestore } from '@/lib/firebase'
+// services/payments-service-supabase.ts
+import { supabase } from '@/lib/supabase'
 import type { Transaction } from '@/lib/types'
-import { generateReadableId } from '@/services/firestore-helpers'
-
-const CLIENTS_COLLECTION = 'clientes'
-const TRANSACTIONS_COLLECTION = 'transacciones'
+import { generateReadableId } from '@/services/supabase-helpers'
 
 export const registerCashPayment = async (data: {
   clientId: string
   amount: number
   description?: string
 }): Promise<Transaction> => {
-  await updateDoc(doc(firestore, CLIENTS_COLLECTION, data.clientId), {
-    currentBalance: increment(-data.amount),
+  // Ajustar saldo atómicamente
+  await supabase.rpc('adjust_client_balance', {
+    p_client_id: data.clientId,
+    p_amount: -data.amount,
   })
 
-  const clientSnap = await getDoc(doc(firestore, CLIENTS_COLLECTION, data.clientId))
-  const clientName = clientSnap.exists() ? (clientSnap.data().name || 'pago') : 'pago'
+  // Obtener nombre del cliente para el ID legible
+  const { data: client } = await supabase
+    .from('clientes')
+    .select('name')
+    .eq('id', data.clientId)
+    .single()
+  const clientName = client?.name || 'pago'
 
-  const docId = await generateReadableId(firestore, TRANSACTIONS_COLLECTION, 'transaccion', clientName)
-  await setDoc(doc(firestore, TRANSACTIONS_COLLECTION, docId), {
-    clientId: data.clientId,
+  const id = await generateReadableId('transacciones', 'transaccion', clientName)
+  const { error } = await supabase.from('transacciones').insert({
+    id,
+    client_id: data.clientId,
     type: 'payment',
     amount: data.amount,
     description: data.description || 'Pago en efectivo',
-    date: serverTimestamp(),
+    date: new Date().toISOString(),
   })
+  if (error) throw error
 
   return {
-    id: docId,
+    id,
     clientId: data.clientId,
     type: 'payment',
     amount: data.amount,

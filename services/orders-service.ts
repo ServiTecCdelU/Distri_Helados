@@ -1,115 +1,119 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-  orderBy,
-  limit,
-  startAfter,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore'
-import { firestore } from '@/lib/firebase'
+// services/orders-service-supabase.ts
+import { supabase } from '@/lib/supabase'
 import type { Order, OrderStatus, CartItem, City } from '@/lib/types'
-import { toDate, generateReadableId } from '@/services/firestore-helpers'
+import { generateReadableId } from '@/services/supabase-helpers'
 
-const ORDERS_COLLECTION = 'pedidos'
+function mapOrder(r: any): Order {
+  const items = r.pedido_items
+    ? r.pedido_items.map((i: any) => ({
+        productId: i.product_id,
+        quantity: i.quantity,
+        name: i.name,
+        price: i.price,
+        ...(i.item_discount ? { itemDiscount: i.item_discount } : {}),
+      }))
+    : r.items || []
 
-const mapOrder = (docSnap: { id: string; data: () => Record<string, any> }): Order => {
-  const data = docSnap.data()
   return {
-    id: docSnap.id,
-    saleId: data.saleId ?? undefined,
-    clientId: data.clientId ?? undefined,
-    clientName: data.clientName ?? undefined,
-    sellerId: data.sellerId ?? undefined,
-    sellerName: data.sellerName ?? undefined,
-    transportistaId: data.transportistaId ?? undefined,
-    transportistaName: data.transportistaName ?? undefined,
-    items: data.items ?? [],
-    status: data.status ?? 'pending',
-    city: data.city ?? undefined,
-    address: data.address ?? 'Retiro en local',
-    lat: data.lat ?? undefined,
-    lng: data.lng ?? undefined,
-    remitoNumber: data.remitoNumber ?? undefined,
-    remitoPdfBase64: data.remitoPdfBase64 ?? undefined,
-    invoiceNumber: data.invoiceNumber ?? undefined,
-    invoicePdfBase64: data.invoicePdfBase64 ?? undefined,
-    checkedItems: data.checkedItems ?? [],
-    createdAt: toDate(data.createdAt),
-    updatedAt: toDate(data.updatedAt ?? data.createdAt),
+    id: r.id,
+    saleId: r.sale_id ?? undefined,
+    clientId: r.client_id ?? undefined,
+    clientName: r.client_name ?? undefined,
+    clientPhone: r.client_phone ?? undefined,
+    clientEmail: r.client_email ?? undefined,
+    sellerId: r.seller_id ?? undefined,
+    sellerName: r.seller_name ?? undefined,
+    transportistaId: r.transportista_id ?? undefined,
+    transportistaName: r.transportista_name ?? undefined,
+    items,
+    status: r.status ?? 'pending',
+    city: r.city ?? undefined,
+    address: r.address ?? 'Retiro en local',
+    lat: r.lat ?? undefined,
+    lng: r.lng ?? undefined,
+    deliveryMethod: r.delivery_method ?? undefined,
+    remitoNumber: r.remito_number ?? undefined,
+    remitoPdfBase64: r.remito_pdf_base64 ?? undefined,
+    invoiceNumber: r.invoice_number ?? undefined,
+    invoicePdfBase64: r.invoice_pdf_base64 ?? undefined,
+    checkedItems: r.checked_items ?? [],
+    createdAt: new Date(r.created_at),
+    updatedAt: new Date(r.updated_at ?? r.created_at),
   }
 }
 
+const SELECT_WITH_ITEMS = '*, pedido_items(*)'
+
 export const getOrders = async (): Promise<Order[]> => {
-  const snapshot = await getDocs(collection(firestore, ORDERS_COLLECTION))
-  return snapshot.docs.map(mapOrder)
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select(SELECT_WITH_ITEMS)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map(mapOrder)
 }
 
 export const getOrdersByTransportista = async (transportistaId: string): Promise<Order[]> => {
-  const q = query(collection(firestore, ORDERS_COLLECTION), where('transportistaId', '==', transportistaId))
-  const snapshot = await getDocs(q)
-  return snapshot.docs.map(mapOrder)
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select(SELECT_WITH_ITEMS)
+    .eq('transportista_id', transportistaId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map(mapOrder)
+}
+
+async function getOrderById(id: string): Promise<Order> {
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select(SELECT_WITH_ITEMS)
+    .eq('id', id)
+    .single()
+  if (error || !data) throw new Error('Order not found')
+  return mapOrder(data)
 }
 
 export const updateOrderStatus = async (id: string, status: OrderStatus): Promise<Order> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
-    status,
-    updatedAt: serverTimestamp(),
-  })
-  const snapshot = await getDoc(doc(firestore, ORDERS_COLLECTION, id))
-  if (!snapshot.exists()) throw new Error('Order not found')
-  return mapOrder(snapshot)
+  const { error } = await supabase.from('pedidos').update({ status }).eq('id', id)
+  if (error) throw error
+  return getOrderById(id)
 }
 
 export const completeOrder = async (id: string, saleId: string): Promise<Order> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
+  const { error } = await supabase.from('pedidos').update({
     status: 'completed',
-    saleId: saleId,
-    updatedAt: serverTimestamp(),
-  })
-  const snapshot = await getDoc(doc(firestore, ORDERS_COLLECTION, id))
-  if (!snapshot.exists()) throw new Error('Order not found')
-  return mapOrder(snapshot)
+    sale_id: saleId,
+  }).eq('id', id)
+  if (error) throw error
+  return getOrderById(id)
 }
 
 export const assignTransportista = async (id: string, transportistaId: string, transportistaName: string): Promise<Order> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
-    transportistaId,
-    transportistaName,
-    status: "delivery",
-    updatedAt: serverTimestamp(),
-  })
-  const snapshot = await getDoc(doc(firestore, ORDERS_COLLECTION, id))
-  if (!snapshot.exists()) throw new Error('Order not found')
-  return mapOrder(snapshot)
+  const { error } = await supabase.from('pedidos').update({
+    transportista_id: transportistaId,
+    transportista_name: transportistaName,
+    status: 'delivery',
+  }).eq('id', id)
+  if (error) throw error
+  return getOrderById(id)
 }
 
 export const removeTransportista = async (id: string): Promise<Order> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
-    transportistaId: null,
-    transportistaName: null,
-    updatedAt: serverTimestamp(),
-  })
-  const snapshot = await getDoc(doc(firestore, ORDERS_COLLECTION, id))
-  if (!snapshot.exists()) throw new Error('Order not found')
-  return mapOrder(snapshot)
+  const { error } = await supabase.from('pedidos').update({
+    transportista_id: null,
+    transportista_name: null,
+  }).eq('id', id)
+  if (error) throw error
+  return getOrderById(id)
 }
 
 export const saveRemitoToOrder = async (id: string, remitoNumber: string, remitoPdfBase64: string): Promise<Order> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
-    remitoNumber,
-    remitoPdfBase64,
-    updatedAt: serverTimestamp(),
-  })
-  const snapshot = await getDoc(doc(firestore, ORDERS_COLLECTION, id))
-  if (!snapshot.exists()) throw new Error('Order not found')
-  return mapOrder(snapshot)
+  const { error } = await supabase.from('pedidos').update({
+    remito_number: remitoNumber,
+    remito_pdf_base64: remitoPdfBase64,
+  }).eq('id', id)
+  if (error) throw error
+  return getOrderById(id)
 }
 
 export const saveBoletaToOrder = async (
@@ -118,24 +122,22 @@ export const saveBoletaToOrder = async (
   invoicePdfBase64: string,
   extra?: { invoiceEmitted?: boolean; afipData?: any; invoiceStatus?: string },
 ): Promise<Order> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
-    invoiceNumber,
-    invoicePdfBase64,
-    ...(extra?.invoiceEmitted != null && { invoiceEmitted: extra.invoiceEmitted }),
-    ...(extra?.afipData && { afipData: extra.afipData }),
-    ...(extra?.invoiceStatus && { invoiceStatus: extra.invoiceStatus }),
-    updatedAt: serverTimestamp(),
-  })
-  const snapshot = await getDoc(doc(firestore, ORDERS_COLLECTION, id))
-  if (!snapshot.exists()) throw new Error('Order not found')
-  return mapOrder(snapshot)
+  const updates: any = {
+    invoice_number: invoiceNumber,
+    invoice_pdf_base64: invoicePdfBase64,
+  }
+  // pedidos no tiene invoice_emitted/afipData/invoiceStatus columns directamente,
+  // pero si se pasan, no rompen nada
+  const { error } = await supabase.from('pedidos').update(updates).eq('id', id)
+  if (error) throw error
+  return getOrderById(id)
 }
 
 export const updateCheckedItems = async (id: string, checkedItems: string[]): Promise<void> => {
-  await updateDoc(doc(firestore, ORDERS_COLLECTION, id), {
-    checkedItems,
-    updatedAt: serverTimestamp(),
-  })
+  const { error } = await supabase.from('pedidos').update({
+    checked_items: checkedItems,
+  }).eq('id', id)
+  if (error) throw error
 }
 
 export const createOrder = async (data: {
@@ -155,22 +157,16 @@ export const createOrder = async (data: {
   discount?: number
   discountType?: 'percent' | 'fixed'
 }): Promise<Order> => {
-  const docId = await generateReadableId(firestore, ORDERS_COLLECTION, 'pedido', data.clientName)
-  const orderRef = doc(firestore, ORDERS_COLLECTION, docId)
-  await setDoc(orderRef, {
-    clientId: data.clientId ?? null,
-    clientName: data.clientName,
-    clientPhone: data.clientPhone ?? null,
-    clientEmail: data.clientEmail ?? null,
-    sellerId: data.sellerId ?? null,
-    sellerName: data.sellerName ?? null,
-    items: data.items.map((item) => ({
-      productId: item.product.id,
-      name: item.product.name,
-      quantity: item.quantity,
-      price: item.product.price,
-      itemDiscount: item.itemDiscount ?? null,
-    })),
+  const id = await generateReadableId('pedidos', 'pedido', data.clientName)
+
+  const { error } = await supabase.from('pedidos').insert({
+    id,
+    client_id: data.clientId ?? null,
+    client_name: data.clientName,
+    client_phone: data.clientPhone ?? null,
+    client_email: data.clientEmail ?? null,
+    seller_id: data.sellerId ?? null,
+    seller_name: data.sellerName ?? null,
     city: data.city ?? null,
     address: data.address,
     lat: data.lat ?? null,
@@ -178,73 +174,65 @@ export const createOrder = async (data: {
     status: data.status ?? 'pending',
     source: data.source ?? 'direct',
     discount: data.discount ?? null,
-    discountType: data.discountType ?? null,
-    saleId: null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    discount_type: data.discountType ?? null,
+    sale_id: null,
   })
+  if (error) throw error
 
-  // Guardar la direccion en la libreta del cliente (por ciudad) si no existe
+  // Insertar items normalizados
+  const itemRows = data.items.map(item => ({
+    order_id: id,
+    product_id: item.product.id,
+    name: item.product.name,
+    quantity: item.quantity,
+    price: item.product.price,
+    item_discount: item.itemDiscount ?? null,
+  }))
+  if (itemRows.length > 0) {
+    await supabase.from('pedido_items').insert(itemRows)
+  }
+
+  // Guardar dirección en la libreta del cliente
   if (data.clientId && data.address && data.city) {
     try {
-      const clientRef = doc(firestore, 'clientes', data.clientId)
-      const clientSnap = await getDoc(clientRef)
-      if (clientSnap.exists()) {
-        const clientData = clientSnap.data()
-        const existing: Array<{ city: string; address: string; lat?: number; lng?: number }> =
-          Array.isArray(clientData.addresses)
-            ? clientData.addresses.filter((a: any) => a && typeof a.address === 'string')
-            : []
-        const normalized = data.address.trim().toLowerCase()
-        const cityKey = data.city.trim()
-        const alreadySaved =
-          existing.some((a) => a.address.trim().toLowerCase() === normalized && a.city === cityKey) ||
-          (clientData.address && clientData.address.trim().toLowerCase() === normalized)
-        if (!alreadySaved) {
-          const newEntry: Record<string, any> = { city: cityKey, address: data.address.trim() }
-          if (data.lat != null) newEntry.lat = data.lat
-          if (data.lng != null) newEntry.lng = data.lng
-          const updates: Record<string, any> = { addresses: [...existing, newEntry] }
-          if (!clientData.address) updates.address = data.address.trim()
-          await updateDoc(clientRef, updates)
-        }
+      const { data: dirs } = await supabase
+        .from('cliente_direcciones')
+        .select('*')
+        .eq('client_id', data.clientId)
+
+      const normalized = data.address.trim().toLowerCase()
+      const alreadySaved = (dirs || []).some(
+        a => a.address.trim().toLowerCase() === normalized && a.city === data.city
+      )
+      if (!alreadySaved) {
+        await supabase.from('cliente_direcciones').insert({
+          client_id: data.clientId,
+          city: data.city,
+          address: data.address.trim(),
+          lat: data.lat ?? null,
+          lng: data.lng ?? null,
+        })
       }
     } catch {
-      // no bloquear la creacion del pedido si falla guardar la direccion
+      // no bloquear la creación del pedido
     }
   }
 
-  const snapshot = await getDoc(orderRef)
-  if (!snapshot.exists()) throw new Error('Failed to create order')
-  return mapOrder(snapshot)
+  return getOrderById(id)
 }
 
 export const getOrdersPaginated = async (
   pageSize: number = 50,
-  lastDoc?: QueryDocumentSnapshot,
-): Promise<{ data: Order[]; lastDoc: QueryDocumentSnapshot | null; hasMore: boolean }> => {
-  let q = query(
-    collection(firestore, ORDERS_COLLECTION),
-    orderBy('createdAt', 'desc'),
-    limit(pageSize),
-  )
-
-  if (lastDoc) {
-    q = query(
-      collection(firestore, ORDERS_COLLECTION),
-      orderBy('createdAt', 'desc'),
-      startAfter(lastDoc),
-      limit(pageSize),
-    )
-  }
-
-  const snapshot = await getDocs(q)
-  const data = snapshot.docs.map(mapOrder)
-  const lastVisible = snapshot.docs[snapshot.docs.length - 1] || null
-
-  return {
-    data,
-    lastDoc: lastVisible,
-    hasMore: snapshot.docs.length === pageSize,
-  }
+  page: number = 0,
+): Promise<{ data: Order[]; page: number; hasMore: boolean }> => {
+  const from = page * pageSize
+  const to = from + pageSize - 1
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select(SELECT_WITH_ITEMS)
+    .order('created_at', { ascending: false })
+    .range(from, to)
+  if (error) throw error
+  const rows = (data || []).map(mapOrder)
+  return { data: rows, page, hasMore: rows.length === pageSize }
 }

@@ -16,7 +16,7 @@
 | 5 | Hooks y uso directo Firestore | ✅ COMPLETADA |
 | 6 | API Routes (preparación) | ✅ COMPLETADA |
 | 7 | Storage (PDFs) | ✅ COMPLETADA |
-| 8 | Switch (reemplazar imports) | ⬜ PENDIENTE |
+| 8 | Switch (reemplazar imports) | ✅ COMPLETADA |
 | 9 | Cleanup (borrar Firebase) | ⬜ PENDIENTE |
 
 ---

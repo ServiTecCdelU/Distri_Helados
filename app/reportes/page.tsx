@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { salesApi, sellersApi } from "@/lib/api";
 import type { Sale, Seller } from "@/lib/types";
-import { toDate } from "@/services/firestore-helpers";
+import { toDate } from "@/services/supabase-helpers";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
 
 export default function ReportesPage() {
