@@ -181,7 +181,7 @@ export const processSale = async (data: {
   const { error: saleError } = await supabase.from('ventas').insert({
     id: saleId,
     sale_number: saleNumber,
-    client_id: data.clientId ?? null,
+    client_id: data.clientId || null,
     client_name: clientName,
     client_phone: clientPhone,
     client_cuit: clientCuit,
@@ -189,7 +189,7 @@ export const processSale = async (data: {
     client_email: clientEmail,
     client_address: clientAddress,
     client_tax_category: clientTaxCategory,
-    seller_id: data.sellerId ?? null,
+    seller_id: data.sellerId || null,
     seller_name: data.sellerName ?? null,
     source: data.source ?? 'direct',
     total,

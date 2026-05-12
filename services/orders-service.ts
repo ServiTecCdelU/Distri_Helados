@@ -163,11 +163,11 @@ export const createOrder = async (data: {
 
   const { error } = await supabase.from('pedidos').insert({
     id,
-    client_id: data.clientId ?? null,
+    client_id: data.clientId || null,
     client_name: data.clientName,
     client_phone: data.clientPhone ?? null,
     client_email: data.clientEmail ?? null,
-    seller_id: data.sellerId ?? null,
+    seller_id: data.sellerId || null,
     seller_name: data.sellerName ?? null,
     city: data.city ?? null,
     address: data.address,
