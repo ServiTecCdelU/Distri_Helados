@@ -71,11 +71,12 @@ export async function procesarEmision(
     .single();
 
   if (saleError || !sale) {
+    console.error("[facturacion-helper] Venta no encontrada:", { saleId, tableName, error: saleError });
     return {
       success: false,
       invoiceNumber: null,
       afipData: null,
-      message: "Documento no encontrado",
+      message: `Documento no encontrado (id: ${saleId}, tabla: ${tableName})`,
       statusCode: 404,
     };
   }
