@@ -1,9 +1,7 @@
-// lib/facturacion-helper.ts
-// Logica compartida para emision de comprobantes AFIP — integración directa WSAA + WSFEv1
-import { adminFirestore } from "@/lib/firebase-admin";
+// lib/facturacion-helper-supabase.ts
+// Logica compartida para emision de comprobantes AFIP — versión Supabase
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { solicitarCAE } from "@/lib/afip-direct";
-// Bit Ingeniería desactivado — integración directa con AFIP
-// import { autorizarComprobante, buildAutorizarRequest, parseCaeVto, BitCustomerData } from "@/lib/bitingenieria";
 
 const TAX_CATEGORY_TO_TIPO_COMP: Record<string, number> = {
   responsable_inscripto: 1,   // Factura A
@@ -43,7 +41,6 @@ function validarCUIT(cuit: string): boolean {
   return cuit.replace(/\D/g, "").length === 11;
 }
 
-
 interface EmitirResult {
   success: boolean;
   invoiceNumber: string | null;
@@ -64,12 +61,16 @@ export async function procesarEmision(
   saleId: string,
   clientOverride?: any,
   emitirAfip?: boolean,
-  collectionName: string = "ventas",
+  tableName: string = "ventas",
 ): Promise<EmitirResult> {
-  const ventaRef = adminFirestore.collection(collectionName).doc(saleId);
-  const ventaSnap = await ventaRef.get();
+  // Leer venta con items
+  const { data: sale, error: saleError } = await supabaseAdmin
+    .from(tableName)
+    .select('*, venta_items(*)')
+    .eq('id', saleId)
+    .single();
 
-  if (!ventaSnap.exists) {
+  if (saleError || !sale) {
     return {
       success: false,
       invoiceNumber: null,
@@ -79,26 +80,23 @@ export async function procesarEmision(
     };
   }
 
-  const sale = ventaSnap.data() || {};
-
   // Resolver datos del cliente
   let clientData: any = clientOverride || {};
-  if (sale.clientId && !clientOverride?.name) {
-    const clientSnap = await adminFirestore
-      .collection("clientes")
-      .doc(sale.clientId)
-      .get();
-    if (clientSnap.exists) {
-      const c = clientSnap.data() || {};
+  if (sale.client_id && !clientOverride?.name) {
+    const { data: client } = await supabaseAdmin
+      .from('clientes')
+      .select('name, phone, email, tax_category, cuit, dni, address')
+      .eq('id', sale.client_id)
+      .single();
+    if (client) {
       clientData = {
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        taxCategory: c.taxCategory || "consumidor_final",
-        cuit: c.cuit,
-        dni: c.dni,
-        address: c.address,
-        city: c.city,
+        name: client.name,
+        phone: client.phone,
+        email: client.email,
+        taxCategory: client.tax_category || "consumidor_final",
+        cuit: client.cuit,
+        dni: client.dni,
+        address: client.address,
       };
     }
   }
@@ -112,11 +110,10 @@ export async function procesarEmision(
   let invoicePdfBase64: string | undefined;
 
   if (emitirAfip) {
-    // Fallback: si el documento no trae `total` (caso típico de pedidos),
-    // calcularlo sumando los items.
+    // Calcular total si no viene en el documento
     let importeTotal = sale.total || 0;
-    if (!importeTotal && Array.isArray(sale.items)) {
-      importeTotal = sale.items.reduce(
+    if (!importeTotal && Array.isArray(sale.venta_items)) {
+      importeTotal = sale.venta_items.reduce(
         (acc: number, it: any) =>
           acc + (Number(it.price) || 0) * (Number(it.quantity) || 0),
         0,
@@ -131,13 +128,13 @@ export async function procesarEmision(
         statusCode: 400,
       };
     }
+
     const taxCategory: string = clientData.taxCategory || "consumidor_final";
     const tipoComprobante = TAX_CATEGORY_TO_TIPO_COMP[taxCategory] ?? 6;
     const condicionIVA = TAX_CATEGORY_TO_CONDICION_IVA[taxCategory] ?? 5;
     const docType = TAX_CATEGORY_TO_DOC_TYPE[taxCategory] ?? 99;
 
     const cuitValido = validarCUIT(clientData.cuit);
-    // AFIP: para consumidor final (doc_type 99), docNro DEBE ser 0
     const docNro =
       docType === 99
         ? 0
@@ -145,7 +142,6 @@ export async function procesarEmision(
           ? parseInt(clientData.cuit.replace(/\D/g, "")) || 0
           : parseInt(clientData.dni?.replace(/\D/g, "") || "0") || 0;
 
-    // Calcular neto e IVA (21%) desde el total
     const totalConDescuento = sale.discount
       ? importeTotal - sale.discount
       : importeTotal;
@@ -169,8 +165,6 @@ export async function procesarEmision(
       if (!afipResponse.cae) {
         throw new Error("AFIP no devolvió CAE válido");
       }
-
-      // PDF se genera del lado del cliente con diseño personalizado
     } catch (err: any) {
       console.error("[AFIP-Direct] Error:", err.message);
       return {
@@ -184,13 +178,13 @@ export async function procesarEmision(
     }
   }
 
-  // Guardar en Firestore
+  // Guardar en Supabase
   const tipoComprobanteGuardado = afipResponse
     ? (TAX_CATEGORY_TO_TIPO_COMP[clientData.taxCategory] ?? 6)
     : null;
 
   const updateData: any = {
-    clientData: {
+    client_data: {
       name: clientData.name,
       phone: clientData.phone,
       email: clientData.email || "",
@@ -198,24 +192,25 @@ export async function procesarEmision(
       cuit: clientData.cuit || "",
       dni: clientData.dni || "",
     },
-    updatedAt: new Date().toISOString(),
   };
 
   if (afipResponse) {
-    updateData.invoiceNumber = invoiceNumber;
-    updateData.invoiceEmitted = true;
-    updateData.invoiceStatus = "emitted";
-    updateData.afipData = {
+    updateData.invoice_number = invoiceNumber;
+    updateData.invoice_emitted = true;
+    updateData.invoice_status = 'emitted';
+
+    // Guardar AFIP data en tabla separada
+    await supabaseAdmin.from('venta_afip_data').upsert({
+      sale_id: saleId,
       cae: afipResponse.cae,
-      caeVencimiento: afipResponse.caeVencimiento,
-      tipoComprobante: tipoComprobanteGuardado,
-      puntoVenta: afipResponse.puntoVenta,
-      numeroComprobante: afipResponse.numeroComprobante,
-    };
-    // PDF se genera del lado del cliente con diseño personalizado
+      cae_vencimiento: afipResponse.caeVencimiento,
+      tipo_comprobante: tipoComprobanteGuardado,
+      punto_venta: afipResponse.puntoVenta,
+      numero_comprobante: afipResponse.numeroComprobante,
+    }, { onConflict: 'sale_id' });
   }
 
-  await ventaRef.update(updateData);
+  await supabaseAdmin.from(tableName).update(updateData).eq('id', saleId);
 
   return {
     success: true,

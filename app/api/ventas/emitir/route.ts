@@ -1,18 +1,13 @@
 // app/api/ventas/emitir/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebase-admin";
+import { verifyAuthToken } from "@/lib/supabase-auth-helper";
 import { procesarEmision } from "@/lib/facturacion-helper";
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
+    const user = await verifyAuthToken(request);
+    if (!user) {
       return NextResponse.json({ message: "No autorizado" }, { status: 401 });
-    }
-    try {
-      await adminAuth.verifyIdToken(authHeader.substring(7));
-    } catch {
-      return NextResponse.json({ message: "Token invalido" }, { status: 401 });
     }
 
     const { saleId, client, emitirAfip, collection: collectionName } = await request.json();

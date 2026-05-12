@@ -1,6 +1,7 @@
 // app/api/facturacion/pdf/[saleId]/route.tsx
 import { NextResponse } from "next/server";
-import { adminAuth, adminFirestore, adminStorage } from "@/lib/firebase-admin";
+import { verifyAuthToken } from "@/lib/supabase-auth-helper";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import React from "react";
 import {
   Document,
@@ -402,55 +403,66 @@ export async function GET(
   context: { params: Promise<{ saleId: string }> },
 ) {
   try {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      try {
-        await adminAuth.verifyIdToken(authHeader.replace("Bearer ", ""));
-      } catch {
-        // Auth falló, permitir en modo desarrollo
-      }
-    }
+    // Auth optional for PDF viewing
+    await verifyAuthToken(request);
 
     const { saleId } = await context.params;
 
-    const bucket = adminStorage.bucket();
-    const filePath = `facturas/${saleId}.pdf`;
-    const file = bucket.file(filePath);
-
-    try {
-      const [exists] = await file.exists();
-      if (exists) {
-        const [url] = await file.getSignedUrl({
-          action: "read",
-          expires: Date.now() + 60 * 60 * 1000,
-        });
-        return NextResponse.redirect(url);
-      }
-    } catch {
-      // No se pudo verificar Storage, generar nuevo PDF
+    // Check if PDF exists in Supabase Storage
+    const storagePath = `facturas/${saleId}.pdf`;
+    const { data: storageFile } = await supabaseAdmin.storage
+      .from('pdfs')
+      .createSignedUrl(storagePath, 3600);
+    if (storageFile?.signedUrl) {
+      return NextResponse.redirect(storageFile.signedUrl);
     }
 
-    const saleSnapshot = await adminFirestore
-      .collection("ventas")
-      .doc(saleId)
-      .get();
-    if (!saleSnapshot.exists) {
+    const { data: saleRow, error: saleError } = await supabaseAdmin
+      .from('ventas')
+      .select('*, venta_items(*), venta_afip_data(*)')
+      .eq('id', saleId)
+      .single();
+    if (saleError || !saleRow) {
       return NextResponse.json(
         { error: "Venta no encontrada" },
         { status: 404 },
       );
     }
 
-    const sale = saleSnapshot.data() || {};
+    const sale = {
+      ...saleRow,
+      items: (saleRow.venta_items || []).map((i: any) => ({
+        name: i.name, quantity: i.quantity, price: i.price,
+      })),
+      clientName: saleRow.client_name,
+      clientCuit: saleRow.client_cuit,
+      clientAddress: saleRow.client_address,
+      clientTaxCategory: saleRow.client_tax_category,
+      invoiceNumber: saleRow.invoice_number,
+      paymentType: saleRow.payment_type,
+      cashAmount: saleRow.cash_amount,
+      creditAmount: saleRow.credit_amount,
+      createdAt: saleRow.created_at,
+      afipData: saleRow.venta_afip_data?.[0] ? {
+        cae: saleRow.venta_afip_data[0].cae,
+        caeVencimiento: saleRow.venta_afip_data[0].cae_vencimiento,
+      } : null,
+    };
 
     let clientData: any = {};
-    if (sale.clientId) {
-      const clientSnapshot = await adminFirestore
-        .collection("clientes")
-        .doc(sale.clientId)
-        .get();
-      if (clientSnapshot.exists) {
-        clientData = clientSnapshot.data();
+    if (saleRow.client_id) {
+      const { data: clientRow } = await supabaseAdmin
+        .from('clientes')
+        .select('name, phone, email, cuit, address, tax_category')
+        .eq('id', saleRow.client_id)
+        .single();
+      if (clientRow) {
+        clientData = {
+          name: clientRow.name,
+          cuit: clientRow.cuit,
+          address: clientRow.address,
+          taxCategory: clientRow.tax_category,
+        };
       }
     }
 
@@ -465,22 +477,16 @@ export async function GET(
       />,
     );
 
-    await file.save(pdfBuffer, {
-      metadata: {
-        contentType: "application/pdf",
-        metadata: {
-          saleId,
-          invoiceNumber: sale.invoiceNumber || "",
-          generatedAt: new Date().toISOString(),
-        },
-      },
+    // Upload to Supabase Storage
+    await supabaseAdmin.storage.from('pdfs').upload(storagePath, pdfBuffer, {
+      contentType: 'application/pdf',
+      upsert: true,
     });
 
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
-    await adminFirestore.collection("ventas").doc(saleId).update({
-      invoicePdfUrl: publicUrl,
-      invoicePdfGeneratedAt: new Date().toISOString(),
-    });
+    const { data: publicUrlData } = supabaseAdmin.storage.from('pdfs').getPublicUrl(storagePath);
+    await supabaseAdmin.from('ventas').update({
+      invoice_pdf_url: publicUrlData.publicUrl,
+    }).eq('id', saleId);
 
     // Convertir Buffer a Uint8Array para NextResponse
     const uint8Array = new Uint8Array(pdfBuffer);

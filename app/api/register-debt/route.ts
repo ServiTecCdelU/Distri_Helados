@@ -1,10 +1,6 @@
 import { NextResponse } from 'next/server'
-import { firestore } from '@/lib/firebase'
-import { generateReadableId } from '@/services/firestore-helpers'
-import { serverTimestamp, setDoc, doc, updateDoc, getDoc } from 'firebase/firestore'
-
-const CLIENTS_COLLECTION = 'clientes'
-const TRANSACTIONS_COLLECTION = 'transacciones'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { generateReadableId } from '@/services/supabase-helpers'
 
 export async function POST(req: Request) {
   try {
@@ -14,19 +10,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Parámetros inválidos' }, { status: 400 })
     }
 
-    // incrementar deuda en cliente
-    const clientRef = doc(firestore, CLIENTS_COLLECTION, clientId)
-    await updateDoc(clientRef, { currentBalance: (await (await getDoc(clientRef)).data())?.currentBalance + amount })
+    // Ajustar saldo con RPC atómico
+    await supabaseAdmin.rpc('adjust_client_balance', {
+      p_client_id: clientId,
+      p_amount: amount,
+    })
 
-    // crear transacción
-    const name = ((await getDoc(clientRef)).data()?.name) || 'deuda'
-    const txId = await generateReadableId(firestore, TRANSACTIONS_COLLECTION, 'transaccion', name)
-    await setDoc(doc(firestore, TRANSACTIONS_COLLECTION, txId), {
-      clientId,
+    // Obtener nombre del cliente para el ID legible
+    const { data: client } = await supabaseAdmin
+      .from('clientes')
+      .select('name')
+      .eq('id', clientId)
+      .single()
+    const name = client?.name || 'deuda'
+
+    const txId = await generateReadableId('transacciones', 'transaccion', name)
+    await supabaseAdmin.from('transacciones').insert({
+      id: txId,
+      client_id: clientId,
       type: 'debt',
       amount,
       description: description || 'Ajuste de deuda',
-      date: serverTimestamp(),
     })
 
     return NextResponse.json({ id: txId })

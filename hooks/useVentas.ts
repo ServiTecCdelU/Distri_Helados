@@ -1,22 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  doc,
-  getDoc,
-  updateDoc,
-  serverTimestamp,
-  where,
-  limit,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 import { savePdfToDatabase, downloadBase64Pdf } from "@/services/pdf-service";
 import { toast } from "sonner";
-import { getAuth } from "firebase/auth";
 import { formatCurrencyDecimals, formatDateTime } from "@/lib/utils/format";
 
 // Helper para nombre de archivo: N°{numero}_{nombre_cliente}.pdf
@@ -27,7 +14,6 @@ function buildDocFilename(tipo: "boleta" | "remito", numero: string | undefined,
     .replace(/[^a-z0-9\s]/g, "")
     .trim()
     .replace(/\s+/g, "_");
-  // Extraer solo el número del comprobante (de "0010-00003068" sacar "3068")
   let nro = numero || "0";
   const match = nro.match(/(\d+)$/);
   if (match) nro = String(parseInt(match[1], 10));
@@ -35,7 +21,7 @@ function buildDocFilename(tipo: "boleta" | "remito", numero: string | undefined,
   return `${prefix}_N°${nro}_${nombre}.pdf`;
 }
 
-// Tipos
+// Tipos (misma interfaz que la versión Firebase)
 export interface VentaItem {
   name: string;
   quantity: number;
@@ -106,11 +92,9 @@ const safeGetDate = (date: any): Date | null => {
   if (!date) return null;
   try {
     let d: Date;
-    if (date?.toDate) d = date.toDate();
-    else if (typeof date === "string") d = new Date(date);
+    if (typeof date === "string") d = new Date(date);
     else if (typeof date === "number") d = new Date(date);
     else if (date instanceof Date) d = date;
-    else if (date?.seconds) d = new Date(date.seconds * 1000);
     else return null;
     return isNaN(d.getTime()) ? null : d;
   } catch {
@@ -135,6 +119,54 @@ const PAYMENT_BADGE_CLASSES: Record<string, string> = {
   mixed: "bg-purple-100 text-purple-800",
 };
 
+// Mapear fila de Supabase a Venta
+function mapVentaRow(row: any): Venta {
+  const items: VentaItem[] = (row.venta_items || []).map((i: any) => ({
+    name: i.name,
+    quantity: i.quantity,
+    price: i.price,
+    itemDiscount: i.item_discount ?? undefined,
+  }));
+
+  return {
+    id: row.id,
+    clientId: row.client_id ?? undefined,
+    clientName: row.client_name ?? undefined,
+    clientPhone: row.client_phone ?? undefined,
+    clientAddress: row.client_address ?? undefined,
+    clientCuit: row.client_cuit ?? undefined,
+    clientTaxCategory: row.client_tax_category ?? undefined,
+    items,
+    total: row.total,
+    paymentType: row.payment_type,
+    cashAmount: row.cash_amount ?? undefined,
+    creditAmount: row.credit_amount ?? undefined,
+    createdAt: row.created_at,
+    invoiceNumber: row.invoice_number ?? undefined,
+    invoiceEmitted: row.invoice_emitted ?? false,
+    afipData: row.venta_afip_data?.[0] ? {
+      cae: row.venta_afip_data[0].cae,
+      caeVencimiento: row.venta_afip_data[0].cae_vencimiento,
+      tipoComprobante: row.venta_afip_data[0].tipo_comprobante,
+      puntoVenta: row.venta_afip_data[0].punto_venta,
+      numeroComprobante: row.venta_afip_data[0].numero_comprobante,
+    } : undefined,
+    invoiceDriveUrl: row.invoice_drive_url ?? undefined,
+    invoiceDriveFileId: row.invoice_drive_file_id ?? undefined,
+    remitoDriveUrl: row.remito_drive_url ?? undefined,
+    remitoDriveFileId: row.remito_drive_file_id ?? undefined,
+    remitoNumber: row.remito_number ?? undefined,
+    remitoPdfBase64: row.remito_pdf_base64 ?? undefined,
+    invoicePdfBase64: row.invoice_pdf_base64 ?? undefined,
+    sellerName: row.seller_name ?? undefined,
+    saleNumber: row.sale_number ?? undefined,
+    deliveryAddress: row.delivery_address ?? undefined,
+    discount: row.discount ?? undefined,
+    discountType: row.discount_type ?? undefined,
+    clientData: row.client_data ?? undefined,
+  };
+}
+
 export function useVentas(filterBySellerId?: string, clientCityMap?: Record<string, string>) {
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -154,39 +186,30 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
   });
 
   const [modalDetalleAbierto, setModalDetalleAbierto] = useState(false);
-  const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(
-    null,
-  );
+  const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null);
   const [modalEmitirAbierto, setModalEmitirAbierto] = useState(false);
   const [ventaParaEmitir, setVentaParaEmitir] = useState<Venta | null>(null);
-  const [tipoDocumento, setTipoDocumento] = useState<"boleta" | "remito">(
-    "boleta",
-  );
+  const [tipoDocumento, setTipoDocumento] = useState<"boleta" | "remito">("boleta");
   const [emitiendo, setEmitiendo] = useState(false);
 
-  // Cargar ventas — limit(200) para acotar lecturas de Firestore
+  // Cargar ventas con JOIN a venta_items y venta_afip_data
   const cargarVentas = useCallback(async () => {
     try {
       setCargando(true);
-      const constraints: any[] = [
-        orderBy("createdAt", "desc"),
-        limit(200),
-      ];
+      let q = supabase
+        .from('ventas')
+        .select('*, venta_items(*), venta_afip_data(*)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
       if (filterBySellerId) {
-        constraints.unshift(where("sellerId", "==", filterBySellerId));
+        q = q.eq('seller_id', filterBySellerId);
       }
-      const q = query(
-        collection(db, "ventas"),
-        ...constraints,
-      );
-      const snapshot = await getDocs(q);
-      const ventasData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Venta[];
-      setVentas(ventasData);
-    } catch (error) {
-      // Error silenciado
+
+      const { data, error } = await q;
+      if (error) throw error;
+      setVentas((data || []).map(mapVentaRow));
+    } catch {
       toast.error("Error al cargar ventas");
     } finally {
       setCargando(false);
@@ -197,10 +220,9 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
     cargarVentas();
   }, [cargarVentas]);
 
-  // Filtrado memoizado — solo se recalcula cuando cambian ventas o filtros
+  // Filtrado memoizado
   const ventasFiltradas = useMemo(() => {
     return ventas.filter((venta) => {
-      // Búsqueda de texto
       if (filtros.searchQuery) {
         const q = filtros.searchQuery.toLowerCase();
         const matchSearch =
@@ -212,7 +234,6 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         if (!matchSearch) return false;
       }
 
-      // Filtro por período
       if (filtros.periodFilter && filtros.periodFilter !== "all") {
         const ventaDate = safeGetDate(venta.createdAt);
         if (ventaDate) {
@@ -236,7 +257,6 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         }
       }
 
-      // Filtro por fecha desde
       if (filtros.dateFrom) {
         const ventaDate = safeGetDate(venta.createdAt);
         const fromDate = new Date(filtros.dateFrom);
@@ -244,7 +264,6 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         if (!ventaDate || ventaDate < fromDate) return false;
       }
 
-      // Filtro por fecha hasta
       if (filtros.dateTo) {
         const ventaDate = safeGetDate(venta.createdAt);
         const toDate = new Date(filtros.dateTo);
@@ -252,45 +271,35 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         if (!ventaDate || ventaDate > toDate) return false;
       }
 
-      // Filtro por tipo de pago
-      if (filtros.paymentFilter !== "all" && venta.paymentType !== filtros.paymentFilter) {
-        return false;
-      }
+      if (filtros.paymentFilter !== "all" && venta.paymentType !== filtros.paymentFilter) return false;
 
-      // Filtro por estado de factura
       if (filtros.invoiceFilter !== "all") {
         if (filtros.invoiceFilter === "emitted" && !venta.invoiceEmitted) return false;
         if (filtros.invoiceFilter === "pending" && venta.invoiceEmitted) return false;
       }
 
-      // Filtro por remito
       if (filtros.remitoFilter && filtros.remitoFilter !== "all") {
-        const tieneRemito = !!(venta as any).remitoNumber;
+        const tieneRemito = !!venta.remitoNumber;
         if (filtros.remitoFilter === "emitted" && !tieneRemito) return false;
         if (filtros.remitoFilter === "pending" && tieneRemito) return false;
       }
 
-      // Filtro por descuento
       if (filtros.discountFilter && filtros.discountFilter !== "all") {
-        const tieneDescuento = !!((venta as any).discount && (venta as any).discount > 0)
-          || (venta.items || []).some((i: any) => i.itemDiscount && i.itemDiscount > 0);
+        const tieneDescuento = !!(venta.discount && venta.discount > 0)
+          || (venta.items || []).some((i) => i.itemDiscount && i.itemDiscount > 0);
         if (filtros.discountFilter === "with" && !tieneDescuento) return false;
         if (filtros.discountFilter === "without" && tieneDescuento) return false;
       }
 
-      // Filtro por cliente
       if (filtros.clientId && venta.clientId !== filtros.clientId) return false;
 
-      // Filtro por vendedor
       if (filtros.sellerId && (venta as any).sellerId !== filtros.sellerId) return false;
 
-      // Filtro por ciudad
       if (filtros.city && clientCityMap) {
         const ventaCity = venta.clientId ? clientCityMap[venta.clientId] : undefined;
         if (ventaCity !== filtros.city) return false;
       }
 
-      // Filtro por método de entrega
       if (filtros.deliveryFilter && filtros.deliveryFilter !== "all") {
         if ((venta as any).deliveryMethod !== filtros.deliveryFilter) return false;
       }
@@ -316,16 +325,17 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
 
   const abrirDetallePorId = useCallback(async (saleId: string) => {
     try {
-      const docRef = doc(db, "ventas", saleId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const venta = { id: docSnap.id, ...docSnap.data() } as Venta;
-        setVentaSeleccionada(venta);
+      const { data, error } = await supabase
+        .from('ventas')
+        .select('*, venta_items(*), venta_afip_data(*)')
+        .eq('id', saleId)
+        .single();
+      if (error) throw error;
+      if (data) {
+        setVentaSeleccionada(mapVentaRow(data));
         setModalDetalleAbierto(true);
       }
-    } catch (error) {
-      // Error silenciado
-    }
+    } catch {}
   }, []);
 
   const abrirEmitir = useCallback((venta: Venta, tipo: "boleta" | "remito" = "boleta") => {
@@ -341,20 +351,49 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
   }, []);
 
   // ==================== GENERACIÓN DE PDF ====================
-
   const generarPdfCompleto = async (
     venta: Venta,
     tipo: "boleta" | "remito",
     afipData?: any,
   ): Promise<string> => {
     const { generarPdfCliente } = await import("@/hooks/useGenerarPdf");
-    try {
-      const pdfBase64 = await generarPdfCliente(venta, tipo, afipData);
-      return pdfBase64;
-    } catch (error: any) {
-      // Error silenciado
-      throw new Error(`Error al generar PDF: ${error.message}`);
+    const pdfBase64 = await generarPdfCliente(venta, tipo, afipData);
+    return pdfBase64;
+  };
+
+  // Helper: obtener token de sesión Supabase
+  const getAuthToken = async (): Promise<string> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Usuario no autenticado");
+    return session.access_token;
+  };
+
+  // Helper: obtener datos frescos del cliente desde Supabase
+  const fetchClientData = async (clientId: string) => {
+    const { data } = await supabase
+      .from('clientes')
+      .select('name, phone, cuit, address, tax_category')
+      .eq('id', clientId)
+      .single();
+    return data;
+  };
+
+  // Helper: obtener siguiente número de remito
+  const getNextRemitoNumber = async (): Promise<string> => {
+    const { data } = await supabase
+      .from('ventas')
+      .select('remito_number')
+      .not('remito_number', 'is', null)
+      .order('remito_number', { ascending: false })
+      .limit(1);
+
+    let ultimoNumero = 0;
+    if (data && data.length > 0) {
+      const last = data[0].remito_number;
+      const match = last?.match(/R-\d+-(\d+)/);
+      if (match) ultimoNumero = parseInt(match[1], 10);
     }
+    return `R-${new Date().getFullYear()}-${String(ultimoNumero + 1).padStart(5, "0")}`;
   };
 
   // ==================== EMITIR DOCUMENTO ====================
@@ -365,14 +404,10 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
     toast.loading(`Generando ${tipoDocumento}...`, { id: toastId });
 
     try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-      if (!user) throw new Error("Usuario no autenticado");
-      const token = await user.getIdToken();
+      const token = await getAuthToken();
 
       if (tipoDocumento === "boleta") {
-        let taxCategory =
-          ventaParaEmitir.clientTaxCategory || "consumidor_final";
+        let taxCategory = ventaParaEmitir.clientTaxCategory || "consumidor_final";
         let clientName = ventaParaEmitir.clientName || "Cliente";
         let clientCuit = ventaParaEmitir.clientCuit || "";
         let clientPhone = ventaParaEmitir.clientPhone || "";
@@ -380,151 +415,108 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
 
         if (ventaParaEmitir.clientId) {
           try {
-            const clientRef = doc(db, "clientes", ventaParaEmitir.clientId);
-            const clientSnap = await getDoc(clientRef);
-            if (clientSnap.exists()) {
-              const clientData = clientSnap.data();
-              taxCategory = clientData.taxCategory || taxCategory;
+            const clientData = await fetchClientData(ventaParaEmitir.clientId);
+            if (clientData) {
+              taxCategory = clientData.tax_category || taxCategory;
               clientName = clientData.name || clientName;
               clientCuit = clientData.cuit || clientCuit;
               clientPhone = clientData.phone || clientPhone;
               clientAddress = clientData.address || clientAddress;
             }
-          } catch (error) {
-            // Error silenciado
-          }
+          } catch {}
         }
 
         // 1. Emitir en AFIP
         const afipResponse = await fetch("/api/ventas/emitir", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({
             saleId: ventaParaEmitir.id,
-            client: {
-              name: clientName,
-              phone: clientPhone,
-              cuit: clientCuit,
-              address: clientAddress,
-              taxCategory: taxCategory,
-            },
+            client: { name: clientName, phone: clientPhone, cuit: clientCuit, address: clientAddress, taxCategory },
             emitirAfip: true,
           }),
         });
 
         if (!afipResponse.ok) {
-          let errorText = "";
-          try {
-            errorText = await afipResponse.text();
-          } catch {
-            errorText = "Error desconocido";
-          }
-          throw new Error(
-            `Error en AFIP (${afipResponse.status}): ${errorText.substring(0, 200)}`,
-          );
+          const errorText = await afipResponse.text().catch(() => "Error desconocido");
+          throw new Error(`Error en AFIP (${afipResponse.status}): ${errorText.substring(0, 200)}`);
         }
 
         const afipResult = await afipResponse.json();
         const { invoiceNumber, afipData } = afipResult;
 
-        // 2. Generar PDF con los datos de AFIP
-        const pdfBase64 = await generarPdfCompleto(
-          { ...ventaParaEmitir, invoiceNumber },
-          "boleta",
-          afipData,
-        );
+        // 2. Generar PDF
+        const pdfBase64 = await generarPdfCompleto({ ...ventaParaEmitir, invoiceNumber }, "boleta", afipData);
 
-        // 3. Guardar en Firestore
-        const ventaRef = doc(db, "ventas", ventaParaEmitir.id);
-        await updateDoc(ventaRef, {
-          invoicePdfBase64: pdfBase64,
-          invoiceNumber,
-          invoiceEmitted: true,
-          invoiceStatus: "emitted",
-          afipData,
-          invoiceGeneratedAt: serverTimestamp(),
-        });
+        // 3. Guardar en Supabase
+        await supabase.from('ventas').update({
+          invoice_pdf_base64: pdfBase64,
+          invoice_number: invoiceNumber,
+          invoice_emitted: true,
+          invoice_status: 'emitted',
+        }).eq('id', ventaParaEmitir.id);
+
+        // Guardar AFIP data en tabla separada
+        if (afipData) {
+          await supabase.from('venta_afip_data').upsert({
+            sale_id: ventaParaEmitir.id,
+            cae: afipData.cae,
+            cae_vencimiento: afipData.caeVencimiento,
+            tipo_comprobante: afipData.tipoComprobante,
+            punto_venta: afipData.puntoVenta,
+            numero_comprobante: afipData.numeroComprobante,
+          }, { onConflict: 'sale_id' });
+        }
 
         // 4. Guardar metadata del PDF
         await savePdfToDatabase(ventaParaEmitir.id, "invoice", {
           base64: pdfBase64,
-          filename: buildDocFilename("boleta", invoiceNumber, venta.clientName || ventaParaEmitir?.clientName),
+          filename: buildDocFilename("boleta", invoiceNumber, ventaParaEmitir.clientName),
           contentType: "application/pdf",
           size: Math.ceil((pdfBase64.length * 3) / 4),
           generatedAt: new Date().toISOString(),
         });
 
         // 5. Descargar
-        downloadBase64Pdf(pdfBase64, buildDocFilename("boleta", invoiceNumber, venta.clientName || ventaParaEmitir?.clientName));
+        downloadBase64Pdf(pdfBase64, buildDocFilename("boleta", invoiceNumber, ventaParaEmitir.clientName));
         toast.success("Boleta emitida correctamente", { id: toastId });
       } else if (tipoDocumento === "remito") {
-        // 1. Generar número de remito
-        const remitosQuery = query(
-          collection(db, "ventas"),
-          where("remitoNumber", "!=", null),
-          orderBy("remitoNumber", "desc"),
-          limit(1),
-        );
-        const remitosSnapshot = await getDocs(remitosQuery);
-        let ultimoNumero = 0;
-        if (!remitosSnapshot.empty) {
-          const lastRemito = remitosSnapshot.docs[0].data().remitoNumber;
-          const match = lastRemito?.match(/R-\d+-(\d+)/);
-          if (match) ultimoNumero = parseInt(match[1], 10);
-        }
-        const remitoNumber = `R-${new Date().getFullYear()}-${String(ultimoNumero + 1).padStart(5, "0")}`;
+        const remitoNumber = await getNextRemitoNumber();
+        const pdfBase64 = await generarPdfCompleto({ ...ventaParaEmitir, remitoNumber }, "remito");
 
-        // 2. Generar PDF
-        const pdfBase64 = await generarPdfCompleto(
-          { ...ventaParaEmitir, remitoNumber },
-          "remito",
-        );
+        await supabase.from('ventas').update({
+          remito_pdf_base64: pdfBase64,
+          remito_number: remitoNumber,
+        }).eq('id', ventaParaEmitir.id);
 
-        // 3. Guardar en Firestore
-        const ventaRef = doc(db, "ventas", ventaParaEmitir.id);
-        await updateDoc(ventaRef, {
-          remitoPdfBase64: pdfBase64,
-          remitoNumber,
-          remitoGeneratedAt: serverTimestamp(),
-        });
-
-        // 4. Guardar metadata del PDF
         await savePdfToDatabase(ventaParaEmitir.id, "remito", {
           base64: pdfBase64,
-          filename: buildDocFilename("remito", remitoNumber, venta.clientName || ventaParaEmitir?.clientName),
+          filename: buildDocFilename("remito", remitoNumber, ventaParaEmitir.clientName),
           contentType: "application/pdf",
           size: Math.ceil((pdfBase64.length * 3) / 4),
           generatedAt: new Date().toISOString(),
         });
 
-        // 5. Descargar
-        downloadBase64Pdf(pdfBase64, buildDocFilename("remito", remitoNumber, venta.clientName || ventaParaEmitir?.clientName));
+        downloadBase64Pdf(pdfBase64, buildDocFilename("remito", remitoNumber, ventaParaEmitir.clientName));
         toast.success("Remito generado correctamente", { id: toastId });
       }
 
       await cargarVentas();
       cerrarEmitir();
     } catch (error: any) {
-      // Error silenciado
       toast.error(`Error: ${error.message}`, { id: toastId });
     } finally {
       setEmitiendo(false);
     }
   };
 
-  // ==================== EMITIR CON DATOS (sin necesitar estado de modal) ====================
+  // ==================== EMITIR CON DATOS (sin modal) ====================
   const emitirConDatos = useCallback(async (venta: Venta, tipo: "boleta" | "remito") => {
     setEmitiendo(true);
     const toastId = `generar-${tipo}-${venta.id}`;
     toast.loading(`Generando ${tipo}...`, { id: toastId });
     try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-      if (!user) throw new Error("Usuario no autenticado");
-      const token = await user.getIdToken();
+      const token = await getAuthToken();
 
       if (tipo === "boleta") {
         let taxCategory = venta.clientTaxCategory || "consumidor_final";
@@ -535,15 +527,13 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
 
         if (venta.clientId) {
           try {
-            const clientRef = doc(db, "clientes", venta.clientId);
-            const clientSnap = await getDoc(clientRef);
-            if (clientSnap.exists()) {
-              const d = clientSnap.data();
-              taxCategory = d.taxCategory || taxCategory;
-              clientName = d.name || clientName;
-              clientCuit = d.cuit || clientCuit;
-              clientPhone = d.phone || clientPhone;
-              clientAddress = d.address || clientAddress;
+            const clientData = await fetchClientData(venta.clientId);
+            if (clientData) {
+              taxCategory = clientData.tax_category || taxCategory;
+              clientName = clientData.name || clientName;
+              clientCuit = clientData.cuit || clientCuit;
+              clientPhone = clientData.phone || clientPhone;
+              clientAddress = clientData.address || clientAddress;
             }
           } catch {}
         }
@@ -563,48 +553,46 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         }
         const { invoiceNumber, afipData } = await afipResponse.json();
         const pdfBase64 = await generarPdfCompleto({ ...venta, invoiceNumber }, "boleta", afipData);
-        await updateDoc(doc(db, "ventas", venta.id), {
-          invoicePdfBase64: pdfBase64, invoiceNumber, invoiceEmitted: true,
-          invoiceStatus: "emitted", afipData, invoiceGeneratedAt: serverTimestamp(),
-        });
+
+        await supabase.from('ventas').update({
+          invoice_pdf_base64: pdfBase64, invoice_number: invoiceNumber,
+          invoice_emitted: true, invoice_status: 'emitted',
+        }).eq('id', venta.id);
+
+        if (afipData) {
+          await supabase.from('venta_afip_data').upsert({
+            sale_id: venta.id,
+            cae: afipData.cae, cae_vencimiento: afipData.caeVencimiento,
+            tipo_comprobante: afipData.tipoComprobante, punto_venta: afipData.puntoVenta,
+            numero_comprobante: afipData.numeroComprobante,
+          }, { onConflict: 'sale_id' });
+        }
+
         await savePdfToDatabase(venta.id, "invoice", {
           base64: pdfBase64, filename: `boleta-${invoiceNumber}.pdf`,
           contentType: "application/pdf", size: Math.ceil((pdfBase64.length * 3) / 4),
           generatedAt: new Date().toISOString(),
         });
-        downloadBase64Pdf(pdfBase64, buildDocFilename("boleta", invoiceNumber, venta.clientName || ventaParaEmitir?.clientName));
-        // Actualizar la venta seleccionada para que el modal refleje los cambios
+        downloadBase64Pdf(pdfBase64, buildDocFilename("boleta", invoiceNumber, venta.clientName));
         setVentaSeleccionada((prev) => prev && prev.id === venta.id ? {
           ...prev, invoicePdfBase64: pdfBase64, invoiceNumber, invoiceEmitted: true,
           invoiceStatus: "emitted", afipData,
         } as Venta : prev);
         toast.success("Boleta emitida correctamente", { id: toastId });
       } else {
-        const remitosQuery = query(
-          collection(db, "ventas"),
-          where("remitoNumber", "!=", null),
-          orderBy("remitoNumber", "desc"),
-          limit(1),
-        );
-        const snap = await getDocs(remitosQuery);
-        let ultimoNumero = 0;
-        if (!snap.empty) {
-          const last = snap.docs[0].data().remitoNumber;
-          const match = last?.match(/R-\d+-(\d+)/);
-          if (match) ultimoNumero = parseInt(match[1], 10);
-        }
-        const remitoNumber = `R-${new Date().getFullYear()}-${String(ultimoNumero + 1).padStart(5, "0")}`;
+        const remitoNumber = await getNextRemitoNumber();
         const pdfBase64 = await generarPdfCompleto({ ...venta, remitoNumber }, "remito");
-        await updateDoc(doc(db, "ventas", venta.id), {
-          remitoPdfBase64: pdfBase64, remitoNumber, remitoGeneratedAt: serverTimestamp(),
-        });
+
+        await supabase.from('ventas').update({
+          remito_pdf_base64: pdfBase64, remito_number: remitoNumber,
+        }).eq('id', venta.id);
+
         await savePdfToDatabase(venta.id, "remito", {
           base64: pdfBase64, filename: `remito-${remitoNumber}.pdf`,
           contentType: "application/pdf", size: Math.ceil((pdfBase64.length * 3) / 4),
           generatedAt: new Date().toISOString(),
         });
-        downloadBase64Pdf(pdfBase64, buildDocFilename("remito", remitoNumber, venta.clientName || ventaParaEmitir?.clientName));
-        // Actualizar la venta seleccionada para que el modal refleje los cambios
+        downloadBase64Pdf(pdfBase64, buildDocFilename("remito", remitoNumber, venta.clientName));
         setVentaSeleccionada((prev) => prev && prev.id === venta.id ? {
           ...prev, remitoPdfBase64: pdfBase64, remitoNumber,
         } as Venta : prev);
@@ -612,17 +600,15 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
       }
       await cargarVentas();
     } catch (error: any) {
-      // Error silenciado
       toast.error(`Error: ${error.message}`, { id: toastId });
     } finally {
       setEmitiendo(false);
     }
-  }, [cargarVentas, generarPdfCompleto]);
+  }, [cargarVentas]);
 
   // Descargar PDF existente
   const descargarPdf = useCallback((venta: Venta, tipo: "boleta" | "remito" = "boleta") => {
-    const base64 =
-      tipo === "boleta" ? venta.invoicePdfBase64 : venta.remitoPdfBase64;
+    const base64 = tipo === "boleta" ? venta.invoicePdfBase64 : venta.remitoPdfBase64;
     if (base64) {
       const filename = buildDocFilename(tipo, tipo === "boleta" ? venta.invoiceNumber : venta.remitoNumber, venta.clientName);
       downloadBase64Pdf(base64, filename);
@@ -634,53 +620,36 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
   const construirUrlWhatsapp = useCallback((venta: Venta) => {
     if (!venta.clientPhone) return null;
     const telefono = venta.clientPhone.replace(/\D/g, "");
-    const formattedPhone = telefono.startsWith("54")
-      ? telefono
-      : `54${telefono}`;
+    const formattedPhone = telefono.startsWith("54") ? telefono : `54${telefono}`;
 
     const tieneFactura = venta.invoiceEmitted && venta.invoicePdfBase64;
     const tieneRemito = venta.remitoNumber && venta.remitoPdfBase64;
 
     let mensaje = `Hola ${venta.clientName || ""},\n\n`;
-
     if (tieneFactura) {
       mensaje += `Tu factura N° ${venta.invoiceNumber} está lista.\n`;
       mensaje += `Total: $${venta.total.toLocaleString("es-AR")}\n\n`;
     }
-
     if (tieneRemito) {
       mensaje += `Tu remito N° ${venta.remitoNumber} está listo.\n\n`;
     }
-
     mensaje += `Para descargar el comprobante, haz clic en el siguiente enlace:\n`;
     mensaje += `${window.location.origin}/ventas?saleId=${venta.id}`;
 
     return `https://wa.me/${formattedPhone}?text=${encodeURIComponent(mensaje)}`;
   }, []);
 
-  const enviarPorWhatsapp = useCallback(async (
-    venta: Venta,
-    tipo: "boleta" | "remito" = "boleta",
-  ) => {
-    const base64 =
-      tipo === "boleta" ? venta.invoicePdfBase64 : venta.remitoPdfBase64;
+  const enviarPorWhatsapp = useCallback(async (venta: Venta, tipo: "boleta" | "remito" = "boleta") => {
+    const base64 = tipo === "boleta" ? venta.invoicePdfBase64 : venta.remitoPdfBase64;
     const phone = venta.clientPhone;
 
-    if (!base64) {
-      toast.error("El PDF no está disponible");
-      return;
-    }
-
-    if (!phone) {
-      toast.error("El cliente no tiene teléfono");
-      return;
-    }
+    if (!base64) { toast.error("El PDF no está disponible"); return; }
+    if (!phone) { toast.error("El cliente no tiene teléfono"); return; }
 
     try {
-      const filename =
-        tipo === "boleta"
-          ? `Factura-${venta.invoiceNumber || venta.id}.pdf`
-          : `Remito-${venta.remitoNumber || venta.id}.pdf`;
+      const filename = tipo === "boleta"
+        ? `Factura-${venta.invoiceNumber || venta.id}.pdf`
+        : `Remito-${venta.remitoNumber || venta.id}.pdf`;
 
       const cleanBase64 = base64.replace(/\s/g, "");
       const byteCharacters = atob(cleanBase64);
@@ -692,33 +661,25 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
       const blob = new Blob([byteArray], { type: "application/pdf" });
 
       const cleanPhone = phone.replace(/\D/g, "");
-      const formattedPhone = cleanPhone.startsWith("54")
-        ? cleanPhone
-        : `54${cleanPhone}`;
+      const formattedPhone = cleanPhone.startsWith("54") ? cleanPhone : `54${cleanPhone}`;
 
-      // MÓVIL: Intentar compartir nativo
       if (navigator.share) {
         try {
           const file = new File([blob], filename, { type: "application/pdf" });
-
           if (navigator.canShare && navigator.canShare({ files: [file] })) {
             await navigator.share({
               files: [file],
               title: filename,
-              text:
-                tipo === "boleta"
-                  ? `Factura N° ${venta.invoiceNumber} - Total: $${venta.total.toLocaleString("es-AR")}`
-                  : `Remito N° ${venta.remitoNumber}`,
+              text: tipo === "boleta"
+                ? `Factura N° ${venta.invoiceNumber} - Total: $${venta.total.toLocaleString("es-AR")}`
+                : `Remito N° ${venta.remitoNumber}`,
             });
             toast.success("Archivo compartido");
             return;
           }
-        } catch {
-          // Compartir nativo no disponible, usar método alternativo
-        }
+        } catch {}
       }
 
-      // DESKTOP/FALLBACK
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -728,37 +689,22 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      const mensaje =
-        tipo === "boleta"
-          ? `Hola ${venta.clientName || ""}! 👋\n\nTe descargué la *Factura N° ${venta.invoiceNumber}*\nTotal: $${venta.total.toLocaleString("es-AR")}\n\n📎 Adjuntá el archivo PDF que se descargó automáticamente.`
-          : `Hola ${venta.clientName || ""}! 👋\n\nTe descargué el *Remito N° ${venta.remitoNumber}*\n\n📎 Adjuntá el archivo PDF que se descargó automáticamente.`;
+      const mensaje = tipo === "boleta"
+        ? `Hola ${venta.clientName || ""}! 👋\n\nTe descargué la *Factura N° ${venta.invoiceNumber}*\nTotal: $${venta.total.toLocaleString("es-AR")}\n\n📎 Adjuntá el archivo PDF que se descargó automáticamente.`
+        : `Hola ${venta.clientName || ""}! 👋\n\nTe descargué el *Remito N° ${venta.remitoNumber}*\n\n📎 Adjuntá el archivo PDF que se descargó automáticamente.`;
 
-      window.open(
-        `https://wa.me/${formattedPhone}?text=${encodeURIComponent(mensaje)}`,
-        "_blank",
-      );
-
-      toast.success("PDF descargado. Adjuntalo manualmente en WhatsApp.", {
-        duration: 5000,
-      });
+      window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(mensaje)}`, "_blank");
+      toast.success("PDF descargado. Adjuntalo manualmente en WhatsApp.", { duration: 5000 });
     } catch (error: any) {
-      // Error silenciado
       toast.error("Error: " + error.message);
     }
   }, []);
 
-  const formatearMoneda = useCallback((monto: number) => {
-    return formatCurrencyDecimals(monto);
-  }, []);
-
-  const formatearFechaHora = useCallback((fecha: any) => {
-    return formatDateTime(fecha);
-  }, []);
+  const formatearMoneda = useCallback((monto: number) => formatCurrencyDecimals(monto), []);
+  const formatearFechaHora = useCallback((fecha: any) => formatDateTime(fecha), []);
 
   const etiquetaPago = useCallback((tipo: string, metodo?: string) => {
-    if (tipo === "cash" && metodo) {
-      return PAYMENT_METHOD_LABELS[metodo] || PAYMENT_LABELS[tipo] || tipo;
-    }
+    if (tipo === "cash" && metodo) return PAYMENT_METHOD_LABELS[metodo] || PAYMENT_LABELS[tipo] || tipo;
     return PAYMENT_LABELS[tipo] || tipo;
   }, []);
 
@@ -766,16 +712,18 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
     return PAYMENT_BADGE_CLASSES[tipo] || "bg-gray-100 text-gray-800";
   }, []);
 
-  // Resolver teléfono del cliente: primero de la venta, si no busca en Firestore
+  // Resolver teléfono del cliente
   const resolverTelefono = useCallback(async (venta: Venta): Promise<string> => {
     const phone = venta.clientPhone?.replace(/\D/g, "") || "";
     if (phone) return phone;
     if (!venta.clientId) return "";
     try {
-      const clientSnap = await getDoc(doc(db, "clientes", venta.clientId));
-      if (clientSnap.exists()) {
-        return clientSnap.data().phone?.replace(/\D/g, "") || "";
-      }
+      const { data } = await supabase
+        .from('clientes')
+        .select('phone')
+        .eq('id', venta.clientId)
+        .single();
+      return data?.phone?.replace(/\D/g, "") || "";
     } catch {}
     return "";
   }, []);

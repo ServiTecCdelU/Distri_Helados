@@ -1,5 +1,4 @@
-import { doc, updateDoc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
 export interface PdfData {
@@ -34,67 +33,26 @@ export const savePdfToDatabase = async (
     );
   }
 
-  // ADVERTENCIA: Firestore tiene límite de 1MB por documento
-  // Base64 aumenta el tamaño ~33%, entonces un PDF de 750KB → ~1MB en base64
-  const MAX_BASE64_SIZE = 900000; // ~900KB en base64 = ~675KB de PDF
-
-  if (pdfData.base64.length > MAX_BASE64_SIZE) {
-    console.warn(
-      `PDF muy grande (${Math.ceil(pdfData.base64.length / 1024)}KB en base64). Considera usar Firebase Storage.`,
-    );
-  }
-
   const updateData: Record<string, any> =
     type === "invoice"
       ? {
-          invoicePdfBase64: pdfData.base64,
-          invoicePdfGeneratedAt: pdfData.generatedAt,
-          invoiceFilename: pdfData.filename,
-          invoicePdfSize: pdfData.size,
-          ...(pdfData.driveUrl && { invoiceDriveUrl: pdfData.driveUrl }),
-          ...(pdfData.driveFileId && {
-            invoiceDriveFileId: pdfData.driveFileId,
-          }),
+          invoice_pdf_base64: pdfData.base64,
+          invoice_filename: pdfData.filename,
+          invoice_pdf_size: pdfData.size,
+          ...(pdfData.driveUrl && { invoice_drive_url: pdfData.driveUrl }),
+          ...(pdfData.driveFileId && { invoice_drive_file_id: pdfData.driveFileId }),
         }
       : {
-          remitoPdfBase64: pdfData.base64,
-          remitoPdfGeneratedAt: pdfData.generatedAt,
-          remitoFilename: pdfData.filename,
-          remitoPdfSize: pdfData.size,
-          ...(pdfData.driveUrl && { remitoDriveUrl: pdfData.driveUrl }),
-          ...(pdfData.driveFileId && {
-            remitoDriveFileId: pdfData.driveFileId,
-          }),
+          remito_pdf_base64: pdfData.base64,
+          remito_filename: pdfData.filename,
+          remito_pdf_size: pdfData.size,
+          ...(pdfData.driveUrl && { remito_drive_url: pdfData.driveUrl }),
+          ...(pdfData.driveFileId && { remito_drive_file_id: pdfData.driveFileId }),
         };
 
-  try {
-    const docRef = doc(db, "ventas", saleId);
-    await updateDoc(docRef, updateData);
-
-    // Verificar que se guardó correctamente leyendo de vuelta
-    const verificacion = await getDoc(docRef);
-    if (verificacion.exists()) {
-      const data = verificacion.data();
-      const base64Guardado =
-        type === "invoice" ? data.invoicePdfBase64 : data.remitoPdfBase64;
-      if (base64Guardado && base64Guardado !== pdfData.base64) {
-        console.error("Base64 guardado es DIFERENTE al original");
-      }
-    }
-  } catch (error: any) {
-    console.error("Error guardando PDF en Firestore:", error);
-
-    // Si el error es por tamaño, dar un mensaje más claro
-    if (
-      error.code === "invalid-argument" ||
-      error.message?.includes("too large")
-    ) {
-      throw new Error(
-        `El PDF es demasiado grande para Firestore (${Math.ceil(pdfData.base64.length / 1024)}KB). ` +
-          "Necesitas implementar Firebase Storage para PDFs grandes.",
-      );
-    }
-
+  const { error } = await supabase.from('ventas').update(updateData).eq('id', saleId);
+  if (error) {
+    console.error("Error guardando PDF:", error);
     throw error;
   }
 };

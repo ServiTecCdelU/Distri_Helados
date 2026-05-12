@@ -13,8 +13,7 @@ import { FileText, X, Download, Send, Loader2, Check } from "lucide-react";
 import { savePdfToDatabase } from "@/services/pdf-service";
 import { toast } from "sonner";
 import type { Venta } from "@/hooks/useVentas";
-import { doc, updateDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 interface ModalBoletaProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -143,11 +142,11 @@ export function ModalBoleta({
 
         setDriveUrl(downloadUrl); // 👈 guardar en state
 
-        // 👈 persistir en Firebase
-        await updateDoc(doc(db, "ventas", saleId), {
-          invoiceDriveUrl: downloadUrl,
-          invoiceDriveFileId: data.fileId,
-        });
+        // Persistir URL de Drive en Supabase
+        await supabase.from('ventas').update({
+          invoice_drive_url: downloadUrl,
+          invoice_drive_file_id: data.fileId,
+        }).eq('id', saleId);
       }
 
       const cleanPhone = phone.replace(/\D/g, "");

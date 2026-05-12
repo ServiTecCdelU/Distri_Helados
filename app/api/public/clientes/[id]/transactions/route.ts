@@ -1,24 +1,27 @@
 import { NextResponse } from 'next/server'
-import { adminFirestore } from '@/lib/firebase-admin'
-import { toDate } from '@/services/firestore-helpers'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const clientId = params.id
-    const snap = await adminFirestore.collection('transacciones').where('clientId', '==', clientId).orderBy('date', 'desc').get()
-    const data = snap.docs.map(d => {
-      const dt = d.data()
-      return {
-        id: d.id,
-        clientId: dt.clientId,
-        type: dt.type,
-        amount: dt.amount,
-        description: dt.description,
-        date: toDate(dt.date),
-        saleId: dt.saleId || null,
-      }
-    })
-    return NextResponse.json(data)
+    const { data, error } = await supabaseAdmin
+      .from('transacciones')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    const result = (data || []).map(r => ({
+      id: r.id,
+      clientId: r.client_id,
+      type: r.type,
+      amount: r.amount,
+      description: r.description,
+      date: r.created_at,
+      saleId: r.sale_id || null,
+    }))
+    return NextResponse.json(result)
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Error' }, { status: 500 })
   }

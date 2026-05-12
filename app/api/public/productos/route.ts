@@ -1,33 +1,34 @@
 // app/api/public/productos/route.ts
 import { NextResponse } from "next/server";
-import { adminFirestore } from "@/lib/firebase-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const snapshot = await adminFirestore.collection("productos").get();
+  const { data, error } = await supabaseAdmin
+    .from('productos')
+    .select('*')
+    .or('disabled.is.null,disabled.eq.false')
+    .order('created_at', { ascending: false });
 
-  const products = snapshot.docs
-    .map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        name: data.name,
-        description: data.description,
-        price: data.price,
-        stock: data.stock,
-        imageUrl: data.imageUrl,
-        category: data.category,
-        createdAt: data.createdAt?.toDate
-          ? data.createdAt.toDate().toISOString()
-          : null,
-        marca: data.marca ?? null,
-        base: data.base ?? "crema",
-        sinTacc: data.sinTacc ?? false,
-        disabled: data.disabled ?? false,
-      };
-    })
-    .filter((product) => product.disabled !== true);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const products = (data || []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    price: r.price,
+    stock: r.stock,
+    imageUrl: r.image_url,
+    category: r.category,
+    createdAt: r.created_at,
+    marca: r.marca ?? null,
+    base: r.base ?? "crema",
+    sinTacc: r.sin_tacc ?? false,
+    disabled: r.disabled ?? false,
+  }));
 
   return NextResponse.json({ products });
 }

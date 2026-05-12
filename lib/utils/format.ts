@@ -1,7 +1,7 @@
 // lib/utils/format.ts
 // Utilidades de formato centralizadas — evitar duplicación entre componentes
 
-import { toDate } from "@/services/firestore-helpers";
+import { toDate } from "@/services/supabase-helpers";
 
 const currencyFormatter = new Intl.NumberFormat("es-AR", {
   style: "currency",

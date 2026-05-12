@@ -30,10 +30,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { salesApi, auditApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import type { Sale } from "@/lib/types";
-import { toDate } from "@/services/firestore-helpers";
-import { collection, doc, setDoc, getDocs, query, where, orderBy, limit, getDoc } from "firebase/firestore";
-import { generateReadableId } from "@/services/firestore-helpers";
-import { firestore } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
+import { generateReadableId } from "@/services/supabase-helpers";
 import { formatCurrency, formatTime } from "@/lib/utils/format";
 
 interface CashRegister {
@@ -74,29 +72,26 @@ export default function CajaPage() {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const registerSnap = await getDocs(
-          query(
-            collection(firestore, "caja"),
-            where("openedAt", ">=", today),
-            orderBy("openedAt", "desc"),
-            limit(1),
-          ),
-        );
+        const { data: cajaData } = await supabase
+          .from('caja')
+          .select('*')
+          .gte('opened_at', today.toISOString())
+          .order('opened_at', { ascending: false })
+          .limit(1);
 
         if (!mounted) return;
 
-        if (!registerSnap.empty) {
-          const d = registerSnap.docs[0];
-          const data = d.data();
+        if (cajaData && cajaData.length > 0) {
+          const data = cajaData[0];
           setCurrentRegister({
-            id: d.id,
-            openedAt: toDate(data.openedAt),
-            closedAt: data.closedAt ? toDate(data.closedAt) : undefined,
-            openedBy: data.openedBy || "",
-            closedBy: data.closedBy || undefined,
-            initialAmount: data.initialAmount || 0,
-            finalAmount: data.finalAmount,
-            expectedAmount: data.expectedAmount,
+            id: data.id,
+            openedAt: new Date(data.opened_at),
+            closedAt: data.closed_at ? new Date(data.closed_at) : undefined,
+            openedBy: data.opened_by || "",
+            closedBy: data.closed_by || undefined,
+            initialAmount: data.initial_amount || 0,
+            finalAmount: data.final_amount,
+            expectedAmount: data.expected_amount,
             difference: data.difference,
             status: data.status || "open",
             notes: data.notes,
@@ -106,7 +101,7 @@ export default function CajaPage() {
         const salesData = await salesApi.getAll();
         if (!mounted) return;
         const todaySales = salesData.filter((sale) => {
-          const dt = toDate(sale.createdAt);
+          const dt = new Date(sale.createdAt);
           return dt >= today;
         });
         setSales(todaySales);
@@ -128,27 +123,24 @@ export default function CajaPage() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const registerSnap = await getDocs(
-        query(
-          collection(firestore, "caja"),
-          where("openedAt", ">=", today),
-          orderBy("openedAt", "desc"),
-          limit(1),
-        ),
-      );
+      const { data: cajaData } = await supabase
+        .from('caja')
+        .select('*')
+        .gte('opened_at', today.toISOString())
+        .order('opened_at', { ascending: false })
+        .limit(1);
 
-      if (!registerSnap.empty) {
-        const doc = registerSnap.docs[0];
-        const data = doc.data();
+      if (cajaData && cajaData.length > 0) {
+        const data = cajaData[0];
         setCurrentRegister({
-          id: doc.id,
-          openedAt: toDate(data.openedAt),
-          closedAt: data.closedAt ? toDate(data.closedAt) : undefined,
-          openedBy: data.openedBy || "",
-          closedBy: data.closedBy || undefined,
-          initialAmount: data.initialAmount || 0,
-          finalAmount: data.finalAmount,
-          expectedAmount: data.expectedAmount,
+          id: data.id,
+          openedAt: new Date(data.opened_at),
+          closedAt: data.closed_at ? new Date(data.closed_at) : undefined,
+          openedBy: data.opened_by || "",
+          closedBy: data.closed_by || undefined,
+          initialAmount: data.initial_amount || 0,
+          finalAmount: data.final_amount,
+          expectedAmount: data.expected_amount,
           difference: data.difference,
           status: data.status || "open",
           notes: data.notes,
@@ -158,7 +150,7 @@ export default function CajaPage() {
       // Get today's sales
       const salesData = await salesApi.getAll();
       const todaySales = salesData.filter((sale) => {
-        const d = toDate(sale.createdAt);
+        const d = new Date(sale.createdAt);
         return d >= today;
       });
       setSales(todaySales);
@@ -193,12 +185,13 @@ export default function CajaPage() {
     setSaving(true);
     try {
       const dateStr = new Date().toISOString().split("T")[0].replace(/-/g, '');
-      const id = await generateReadableId(firestore, "caja", "caja", dateStr);
-      await setDoc(doc(firestore, "caja", id), {
-        openedAt: new Date(),
-        openedBy: user.name || user.email,
-        initialAmount: parseFloat(initialAmount),
-        status: "open",
+      const id = await generateReadableId('caja', 'caja', dateStr);
+      await supabase.from('caja').insert({
+        id,
+        opened_at: new Date().toISOString(),
+        opened_by: user.name || user.email,
+        initial_amount: parseFloat(initialAmount),
+        status: 'open',
       });
       setCurrentRegister({
         id,
@@ -231,20 +224,19 @@ export default function CajaPage() {
       const final = parseFloat(finalAmount);
       const diff = final - expectedCash;
 
-      const { updateDoc } = await import("firebase/firestore");
-      await updateDoc(doc(firestore, "caja", currentRegister.id), {
-        closedAt: new Date(),
-        closedBy: user.name || user.email,
-        finalAmount: final,
-        expectedAmount: expectedCash,
+      await supabase.from('caja').update({
+        closed_at: new Date().toISOString(),
+        closed_by: user.name || user.email,
+        final_amount: final,
+        expected_amount: expectedCash,
         difference: diff,
-        status: "closed",
+        status: 'closed',
         notes: closeNotes || "",
-        salesCount: todayStats.count,
-        totalSales: todayStats.total,
-        cashTotal: todayStats.cashTotal,
-        creditTotal: todayStats.creditTotal,
-      });
+        sales_count: todayStats.count,
+        total_sales: todayStats.total,
+        cash_total: todayStats.cashTotal,
+        credit_total: todayStats.creditTotal,
+      }).eq('id', currentRegister.id);
 
       setCurrentRegister({
         ...currentRegister,

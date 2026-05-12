@@ -1,6 +1,6 @@
 // app/api/public/pedidos/route.ts
 import { NextResponse } from "next/server";
-import { adminFirestore } from "@/lib/firebase-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -14,18 +14,21 @@ function slugify(text: string): string {
 }
 
 async function generateAdminReadableId(
-  collection: string,
+  table: string,
   prefix: string,
   identifier: string,
 ): Promise<string> {
-  const slug = slugify(identifier);
-  const base = `${prefix}_${slug}`;
-  for (let num = 1; num < 1000; num++) {
-    const candidateId = `${base}_${num}`;
-    const doc = await adminFirestore.collection(collection).doc(candidateId).get();
-    if (!doc.exists) return candidateId;
+  const { data, error } = await supabaseAdmin.rpc('generate_readable_id', {
+    p_table: table,
+    p_prefix: prefix,
+    p_identifier: identifier,
+  });
+  if (error || !data) {
+    // Fallback
+    const slug = slugify(identifier);
+    return `${prefix}_${slug}_${Date.now()}`;
   }
-  return `${base}_${Date.now()}`;
+  return data;
 }
 
 export async function POST(request: Request) {
@@ -62,72 +65,46 @@ export async function POST(request: Request) {
 
   if (!clientId) {
     // Buscar cliente existente por CUIT, DNI o email
-    let existingSnap = null;
+    let existingClient: any = null;
 
     if (cuit) {
-      existingSnap = await adminFirestore
-        .collection("clientes")
-        .where("cuit", "==", cuit)
-        .limit(1)
-        .get();
+      const { data } = await supabaseAdmin.from('clientes').select('*').eq('cuit', cuit).limit(1);
+      if (data && data.length > 0) existingClient = data[0];
     }
-    if ((!existingSnap || existingSnap.empty) && dni) {
-      existingSnap = await adminFirestore
-        .collection("clientes")
-        .where("dni", "==", dni)
-        .limit(1)
-        .get();
+    if (!existingClient && dni) {
+      const { data } = await supabaseAdmin.from('clientes').select('*').eq('dni', dni).limit(1);
+      if (data && data.length > 0) existingClient = data[0];
     }
-    if ((!existingSnap || existingSnap.empty) && email) {
-      existingSnap = await adminFirestore
-        .collection("clientes")
-        .where("email", "==", email)
-        .limit(1)
-        .get();
+    if (!existingClient && email) {
+      const { data } = await supabaseAdmin.from('clientes').select('*').eq('email', email).limit(1);
+      if (data && data.length > 0) existingClient = data[0];
     }
 
-    if (existingSnap && !existingSnap.empty) {
-      const docSnap = existingSnap.docs[0];
-      clientId = docSnap.id;
-      clientName = docSnap.data().name || name;
+    if (existingClient) {
+      clientId = existingClient.id;
+      clientName = existingClient.name || name;
 
-      // Actualizar datos si cambió algo
       const updates: Record<string, unknown> = {};
-      if (phone && !docSnap.data().phone) updates.phone = phone;
-      if (email && !docSnap.data().email) updates.email = email;
-      if (address && !docSnap.data().address) updates.address = address;
+      if (phone && !existingClient.phone) updates.phone = phone;
+      if (email && !existingClient.email) updates.email = email;
+      if (address && !existingClient.address) updates.address = address;
       if (Object.keys(updates).length > 0) {
-        await adminFirestore.collection("clientes").doc(clientId).update(updates);
+        await supabaseAdmin.from('clientes').update(updates).eq('id', clientId);
       }
     } else {
-      // Crear nuevo cliente con ID legible: cliente_{name}_{cuit} o cliente_{name}_{counter}
-      let clientDocId: string;
-      if (cuit) {
-        // ID con nombre + CUIT (único por persona)
-        const namePart = slugify(name);
-        const cuitPart = cuit.replace(/[^0-9]/g, "");
-        clientDocId = `cliente_${namePart}_${cuitPart}`;
-        // Verificar si ya existe ese ID
-        const existing = await adminFirestore.collection("clientes").doc(clientDocId).get();
-        if (existing.exists) {
-          // Fallback a contador
-          clientDocId = await generateAdminReadableId("clientes", "cliente", name);
-        }
-      } else {
-        clientDocId = await generateAdminReadableId("clientes", "cliente", name);
-      }
+      const clientDocId = await generateAdminReadableId("clientes", "cliente", name);
 
-      await adminFirestore.collection("clientes").doc(clientDocId).set({
+      await supabaseAdmin.from('clientes').insert({
+        id: clientDocId,
         name,
         dni: dni || null,
         cuit: cuit || null,
         email: email || null,
         phone,
         address: address || null,
-        taxCategory,
-        creditLimit: 0,
-        currentBalance: 0,
-        createdAt: new Date(),
+        tax_category: taxCategory,
+        credit_limit: 0,
+        current_balance: 0,
       });
       clientId = clientDocId;
     }
@@ -140,30 +117,41 @@ export async function POST(request: Request) {
     body.address ||
     (isPickup ? "Retiro en local" : "Dirección no especificada");
 
-  // Crear pedido con ID legible: pedido_{clientName}_{counter}
+  // Crear pedido con ID legible
   const orderDocId = await generateAdminReadableId("pedidos", "pedido", clientName);
 
-  await adminFirestore.collection("pedidos").doc(orderDocId).set({
-    saleId: null,
-    clientId,
-    clientName,
-    clientPhone: phone || null,
-    clientEmail: email || null,
-    sellerId: null,
-    sellerName: null,
-    items: body.items,
+  await supabaseAdmin.from('pedidos').insert({
+    id: orderDocId,
+    sale_id: null,
+    client_id: clientId,
+    client_name: clientName,
+    client_phone: phone || null,
+    client_email: email || null,
+    seller_id: null,
+    seller_name: null,
     city: isPickup ? null : (body.city || null),
     address: resolvedAddress,
     lat: isPickup ? null : (body.lat ?? null),
     lng: isPickup ? null : (body.lng ?? null),
-    deliveryMethod,
+    delivery_method: deliveryMethod,
     status: "pending",
     source: "tienda",
     discount: body.discount ?? null,
-    discountType: body.discountType ?? null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    discount_type: body.discountType ?? null,
   });
+
+  // Insertar items normalizados
+  if (body.items.length > 0) {
+    const itemRows = body.items.map((item: any) => ({
+      order_id: orderDocId,
+      product_id: item.productId || null,
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      item_discount: item.itemDiscount ?? null,
+    }));
+    await supabaseAdmin.from('pedido_items').insert(itemRows);
+  }
 
   return NextResponse.json({ orderId: orderDocId });
 }

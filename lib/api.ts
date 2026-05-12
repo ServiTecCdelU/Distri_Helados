@@ -52,8 +52,7 @@ import {
   saveBoletaToOrder,
   updateCheckedItems,
 } from '@/services/orders-service'
-import { doc, updateDoc } from 'firebase/firestore'
-import { firestore } from '@/lib/firebase'
+import { supabase } from '@/lib/supabase'
 import {
   getDashboardStats,
   getSalesLastDays,
@@ -159,13 +158,13 @@ export const salesApi = {
   },
   async emitInvoice(saleId: string, client?: { name?: string; phone?: string; email?: string }) {
     const invoice = await createInvoice({ saleId, client })
-    await updateDoc(doc(firestore, 'ventas', saleId), {
-      invoiceEmitted: true,
-      invoiceNumber: invoice.invoiceNumber,
-      invoiceStatus: 'generated',
-      invoicePdfUrl: invoice.pdfUrl,
-      invoiceWhatsappUrl: invoice.whatsappUrl ?? null,
-    })
+    await supabase.from('ventas').update({
+      invoice_emitted: true,
+      invoice_number: invoice.invoiceNumber,
+      invoice_status: 'generated',
+      invoice_pdf_url: invoice.pdfUrl,
+      invoice_whatsapp_url: invoice.whatsappUrl ?? null,
+    }).eq('id', saleId)
     return invoice
   },
   async saveBoletaToSale(saleId: string, invoiceNumber: string, invoicePdfBase64: string, extra?: { afipData?: any }): Promise<void> {
@@ -195,10 +194,10 @@ export const invoiceApi = {
 export const remitoApi = {
   async createRemito(saleId: string) {
     const remito = await createRemito({ saleId })
-    await updateDoc(doc(firestore, 'ventas', saleId), {
-      remitoNumber: remito.remitoNumber,
-      remitoPdfUrl: remito.pdfUrl,
-    })
+    await supabase.from('ventas').update({
+      remito_number: remito.remitoNumber,
+      remito_pdf_url: remito.pdfUrl,
+    }).eq('id', saleId)
     return remito
   },
 }

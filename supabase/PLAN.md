@@ -17,7 +17,7 @@
 | 6 | API Routes (preparación) | ✅ COMPLETADA |
 | 7 | Storage (PDFs) | ✅ COMPLETADA |
 | 8 | Switch (reemplazar imports) | ✅ COMPLETADA |
-| 9 | Cleanup (borrar Firebase) | ⬜ PENDIENTE |
+| 9 | Cleanup (borrar Firebase) | ✅ COMPLETADA |
 
 ---
 
@@ -283,14 +283,14 @@ Reemplazar los imports en todo el proyecto:
 
 ---
 
-## Fase 9: Cleanup ⬜ PENDIENTE
+## Fase 9: Cleanup ✅ COMPLETADA
 
-1. Desinstalar: `firebase`, `firebase-admin`
-2. Eliminar: `lib/firebase.ts`, `lib/firebase-admin.ts`, `lib/storage.ts`, `services/firestore-helpers.ts`
-3. Eliminar archivos con sufijo `-firebase.ts`
-4. Eliminar env vars Firebase de `.env.local` y Vercel
-5. Actualizar `CLAUDE.md`
-6. Eliminar `scripts/migrate-to-supabase.ts`
+1. ✅ Desinstalado: `firebase`, `firebase-admin` (143 paquetes removidos)
+2. ✅ Eliminado: `lib/firebase.ts`, `lib/firebase-admin.ts`, `lib/storage-firebase.ts`, `services/firestore-helpers-firebase.ts`, `services/firestore-helpers-temp.ts`
+3. ✅ Eliminados 15 archivos con sufijo `-firebase.ts` (servicios, hooks, helpers)
+4. ✅ Eliminado código muerto: `lib/api/` (index.ts, orders.ts, orders-fixed.ts)
+5. Pendiente: Eliminar env vars Firebase de `.env.local` y Vercel (manual)
+6. Pendiente: Actualizar `CLAUDE.md` con nueva arquitectura Supabase
 
 ---
 

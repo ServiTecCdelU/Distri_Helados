@@ -16,8 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
-import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
-import { firestore } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 import { OrdersFilters } from "@/components/pedidos/orders-filters";
 import { OrderCard } from "@/components/pedidos/order-card";
 import { OrderDetailModal } from "@/components/pedidos/order-detail-modal";
@@ -159,10 +158,12 @@ export default function PedidosPage() {
   useEffect(() => {
     const loadExtraCities = async () => {
       try {
-        const { doc, getDoc } = await import("firebase/firestore");
-        const ref = doc(firestore, "configuracion", "ciudades_reparto");
-        const snap = await getDoc(ref);
-        if (snap.exists()) setExtraCities(snap.data().cities || []);
+        const { data } = await supabase
+          .from('configuracion')
+          .select('value')
+          .eq('key', 'ciudades_reparto')
+          .single();
+        if (data?.value) setExtraCities((data.value as any).cities || []);
       } catch {}
     };
     loadExtraCities();
@@ -173,8 +174,11 @@ export default function PedidosPage() {
     if (!city || extraCities.includes(city)) return;
     const updated = [...extraCities, city];
     try {
-      const { doc, setDoc } = await import("firebase/firestore");
-      await setDoc(doc(firestore, "configuracion", "ciudades_reparto"), { cities: updated }, { merge: true });
+      await supabase.from('configuracion').upsert({
+        key: 'ciudades_reparto',
+        value: { cities: updated },
+        updated_at: new Date().toISOString(),
+      });
       setExtraCities(updated);
       setNewCityInput("");
       toast.success("Ciudad agregada");
@@ -184,8 +188,11 @@ export default function PedidosPage() {
   const handleRemoveCity = async (city: string) => {
     const updated = extraCities.filter(c => c !== city);
     try {
-      const { doc, setDoc } = await import("firebase/firestore");
-      await setDoc(doc(firestore, "configuracion", "ciudades_reparto"), { cities: updated }, { merge: true });
+      await supabase.from('configuracion').upsert({
+        key: 'ciudades_reparto',
+        value: { cities: updated },
+        updated_at: new Date().toISOString(),
+      });
       setExtraCities(updated);
     } catch { toast.error("Error al eliminar"); }
   };
@@ -202,17 +209,16 @@ export default function PedidosPage() {
 
     setGeneratingDoc(true);
     try {
-      // Generate sequential remito number (query ventas for last number)
-      const remitosQuery = query(
-        collection(firestore, "ventas"),
-        where("remitoNumber", "!=", null),
-        orderBy("remitoNumber", "desc"),
-        limit(1),
-      );
-      const snap = await getDocs(remitosQuery);
+      // Generate sequential remito number
+      const { data: lastRemitoData } = await supabase
+        .from('ventas')
+        .select('remito_number')
+        .not('remito_number', 'is', null)
+        .order('remito_number', { ascending: false })
+        .limit(1);
       let ultimoNumero = 0;
-      if (!snap.empty) {
-        const lastRemito = snap.docs[0].data().remitoNumber;
+      if (lastRemitoData && lastRemitoData.length > 0) {
+        const lastRemito = lastRemitoData[0].remito_number;
         const match = lastRemito?.match(/R-\d+-(\d+)/);
         if (match) ultimoNumero = parseInt(match[1], 10);
       }
@@ -263,11 +269,9 @@ export default function PedidosPage() {
       // Si el pedido ya fue procesado como venta, emitir sobre la venta (tiene
       // total, paymentMethod, etc.). Si no, emitir directo sobre el pedido —
       // el helper calcula el total desde los items.
-      const { getAuth } = await import("firebase/auth");
-      const auth = getAuth();
-      const currentUser = auth.currentUser;
-      if (!currentUser) throw new Error("Usuario no autenticado");
-      const token = await currentUser.getIdToken();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Usuario no autenticado");
+      const token = session.access_token;
 
       // Resolver datos del cliente
       let clientData: any = {

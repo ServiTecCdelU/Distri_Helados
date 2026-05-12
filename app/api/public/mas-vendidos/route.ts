@@ -1,41 +1,37 @@
 // app/api/public/mas-vendidos/route.ts
 import { NextResponse } from "next/server";
-import { adminFirestore } from "@/lib/firebase-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const [ventasSnap, productosSnap] = await Promise.all([
-    adminFirestore.collection("ventas").get(),
-    adminFirestore.collection("productos").get(),
+  // Query venta_items with product JOIN — mucho más eficiente que Firestore
+  const [itemsRes, productosRes] = await Promise.all([
+    supabaseAdmin.from('venta_items').select('product_id, quantity'),
+    supabaseAdmin.from('productos').select('id, name, description, price, stock, image_url, category, sin_tacc, disabled'),
   ]);
 
   // Aggregate quantities sold per productId
   const countMap: Record<string, number> = {};
-  for (const doc of ventasSnap.docs) {
-    const data = doc.data();
-    const items: { productId: string; quantity: number }[] = data.items || [];
-    for (const item of items) {
-      if (item.productId) {
-        countMap[item.productId] = (countMap[item.productId] || 0) + (item.quantity || 1);
-      }
+  for (const item of (itemsRes.data || [])) {
+    if (item.product_id) {
+      countMap[item.product_id] = (countMap[item.product_id] || 0) + (item.quantity || 1);
     }
   }
 
-  // Build product map
+  // Build product map (exclude disabled)
   const productMap: Record<string, any> = {};
-  for (const doc of productosSnap.docs) {
-    const data = doc.data();
-    if (data.disabled === true) continue;
-    productMap[doc.id] = {
-      id: doc.id,
-      name: data.name,
-      description: data.description,
-      price: data.price,
-      stock: data.stock,
-      imageUrl: data.imageUrl,
-      category: data.category,
-      sinTacc: data.sinTacc ?? false,
+  for (const r of (productosRes.data || [])) {
+    if (r.disabled === true) continue;
+    productMap[r.id] = {
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      price: r.price,
+      stock: r.stock,
+      imageUrl: r.image_url,
+      category: r.category,
+      sinTacc: r.sin_tacc ?? false,
     };
   }
 
@@ -46,13 +42,12 @@ export async function GET() {
     .slice(0, 3)
     .map(([id, soldCount]) => ({ ...productMap[id], soldCount }));
 
-  // If fewer than 3 products have sales, fill with other products
   if (top3.length < 3) {
     const existing = new Set(top3.map((p) => p.id));
     const extras = Object.values(productMap)
-      .filter((p) => !existing.has(p.id))
+      .filter((p: any) => !existing.has(p.id))
       .slice(0, 3 - top3.length)
-      .map((p) => ({ ...p, soldCount: 0 }));
+      .map((p: any) => ({ ...p, soldCount: 0 }));
     top3.push(...extras);
   }
 

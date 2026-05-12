@@ -1,17 +1,12 @@
 // app/api/afip/cuit/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { consultarCUIT } from "@/lib/afip-direct";
-import { adminAuth } from "@/lib/firebase-admin";
+import { verifyAuthToken } from "@/lib/supabase-auth-helper";
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
+  const user = await verifyAuthToken(req);
+  if (!user) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  }
-  try {
-    await adminAuth.verifyIdToken(authHeader.substring(7));
-  } catch {
-    return NextResponse.json({ error: "Token inválido" }, { status: 401 });
   }
 
   const cuit = req.nextUrl.searchParams.get("cuit");

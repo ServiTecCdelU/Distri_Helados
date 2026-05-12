@@ -1,6 +1,6 @@
 // app/api/public/clientes/route.ts
 import { NextResponse } from "next/server";
-import { adminFirestore } from "@/lib/firebase-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { rateLimit } from "@/lib/rate-limit";
 import { formatCuit, normalizeCuit } from "@/lib/utils/format";
 
@@ -54,72 +54,67 @@ export async function GET(request: Request) {
     if (digits && !candidates.includes(digits)) candidates.push(digits);
   }
 
+  const mapClient = (r: any) => ({
+    id: r.id,
+    name: r.name || "",
+    phone: r.phone || "",
+    address: r.address || "",
+    email: r.email || "",
+    cuit: r.cuit || "",
+    dni: r.dni || "",
+    taxCategory: r.tax_category || "consumidor_final",
+    creditLimit: r.credit_limit ?? 50000,
+    currentBalance: r.current_balance ?? 0,
+  });
+
   // Prioridad: buscar por dni/cuit exacto si fue provisto
   if (dni || cuit) {
-    let snapshot = null as FirebaseFirestore.QuerySnapshot | null;
+    let foundClient = null;
     for (const value of candidates) {
-      const snap = await adminFirestore
-        .collection("clientes")
-        .where(field, "==", value)
-        .limit(1)
-        .get();
-      if (!snap.empty) {
-        snapshot = snap;
+      const { data } = await supabaseAdmin
+        .from('clientes')
+        .select('*')
+        .eq(field, value)
+        .limit(1);
+      if (data && data.length > 0) {
+        foundClient = data[0];
         break;
       }
     }
-    if (!snapshot || snapshot.empty) {
+    if (!foundClient) {
       return NextResponse.json({ found: false });
     }
 
-    const doc = snapshot.docs[0];
-    const data = doc.data();
-    return NextResponse.json({
-      found: true,
-      client: {
-        id: doc.id,
-        name: data.name || "",
-        phone: data.phone || "",
-        address: data.address || "",
-        email: data.email || "",
-        cuit: data.cuit || "",
-        dni: data.dni || "",
-        taxCategory: data.taxCategory || "consumidor_final",
-        creditLimit: data.creditLimit ?? 50000,
-        currentBalance: data.currentBalance ?? 0,
-      },
-    });
+    return NextResponse.json({ found: true, client: mapClient(foundClient) });
   }
 
-  // Si llegamos acá hay un query libre 'q' -> buscar server-side por varios campos
+  // Si llegamos acá hay un query libre 'q' -> buscar server-side
   if (q) {
+    // Supabase: usar ilike para búsqueda parcial por nombre, email, cuit, dni, address
+    const { data: allClients } = await supabaseAdmin
+      .from('clientes')
+      .select('*')
+      .limit(500);
+
+    if (!allClients || allClients.length === 0) return NextResponse.json({ found: false });
+
     const normQ = normalizeForSearch(q);
-    // Obtener todos los clientes y filtrar (dataset pequeño asumido)
-    const snap = await adminFirestore.collection("clientes").get();
-    const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-    const matches: Array<{ id: string; data: FirebaseFirestore.DocumentData }> = [];
-
     const digitsQ = (q || "").replace(/[^0-9]/g, "");
+    const matches: any[] = [];
 
-    for (const docItem of docs) {
-      const data = docItem.data;
-      const nName = normalizeForSearch(data.name || "");
-      const nEmail = normalizeForSearch(data.email || "");
-      const nAddr = normalizeForSearch(data.address || "");
-      const nDni = normalizeForSearch(data.dni || "");
-      const nCuit = normalizeForSearch(data.cuit || "");
+    for (const row of allClients) {
+      const nName = normalizeForSearch(row.name || "");
+      const nEmail = normalizeForSearch(row.email || "");
+      const nAddr = normalizeForSearch(row.address || "");
+      const nDni = normalizeForSearch(row.dni || "");
+      const nCuit = normalizeForSearch(row.cuit || "");
       let matched = false;
       if (nName === normQ || nName.includes(normQ)) matched = true;
       else if (nEmail && nEmail.includes(normQ)) matched = true;
-      else if (digitsQ && String(data.phone || "").replace(/[^0-9]/g, "").includes(digitsQ)) matched = true;
+      else if (digitsQ && String(row.phone || "").replace(/[^0-9]/g, "").includes(digitsQ)) matched = true;
       else if (nDni.includes(normQ) || nCuit.includes(normQ)) matched = true;
       else if (nAddr.includes(normQ)) matched = true;
-      else if (Array.isArray(data.addresses)) {
-        for (const a of data.addresses) {
-          if (normalizeForSearch(a.address || "").includes(normQ)) { matched = true; break; }
-        }
-      }
-      if (matched) matches.push(docItem);
+      if (matched) matches.push(row);
       if (matches.length >= 10) break;
     }
 
@@ -127,18 +122,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       found: true,
-      clients: matches.map((m) => ({
-        id: m.id,
-        name: m.data.name || "",
-        phone: m.data.phone || "",
-        address: m.data.address || "",
-        email: m.data.email || "",
-        cuit: m.data.cuit || "",
-        dni: m.data.dni || "",
-        taxCategory: m.data.taxCategory || "consumidor_final",
-        creditLimit: m.data.creditLimit ?? 50000,
-        currentBalance: m.data.currentBalance ?? 0,
-      })),
+      clients: matches.map(mapClient),
     });
   }
 }

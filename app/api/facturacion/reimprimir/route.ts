@@ -1,19 +1,15 @@
 // app/api/facturacion/reimprimir/route.ts
 // Reimprime el PDF de un comprobante ya emitido via Bit Ingeniería
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth, adminFirestore } from "@/lib/firebase-admin";
+import { verifyAuthToken } from "@/lib/supabase-auth-helper";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reimprimirPdf, buildPdfRequest, BitCustomerData } from "@/lib/bitingenieria";
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
+    const user = await verifyAuthToken(request);
+    if (!user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-    try {
-      await adminAuth.verifyIdToken(authHeader.substring(7));
-    } catch {
-      return NextResponse.json({ error: "Token inválido" }, { status: 401 });
     }
 
     const body = await request.json();
@@ -26,17 +22,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Buscar la venta en Firestore
-    const ventaSnap = await adminFirestore.collection("ventas").doc(saleId).get();
-    if (!ventaSnap.exists) {
+    // Buscar la venta en Supabase con AFIP data
+    const { data: saleRow, error: saleError } = await supabaseAdmin
+      .from('ventas')
+      .select('*, venta_items(*), venta_afip_data(*)')
+      .eq('id', saleId)
+      .single();
+    if (saleError || !saleRow) {
       return NextResponse.json(
         { error: "Venta no encontrada" },
         { status: 404 }
       );
     }
 
-    const sale = ventaSnap.data() || {};
-    const afipData = sale.afipData;
+    const sale = saleRow;
+    const afipDataRow = sale.venta_afip_data?.[0];
+    const afipData = afipDataRow ? {
+      cae: afipDataRow.cae,
+      caeVencimiento: afipDataRow.cae_vencimiento,
+      tipoComprobante: afipDataRow.tipo_comprobante,
+      puntoVenta: afipDataRow.punto_venta,
+      numeroComprobante: afipDataRow.numero_comprobante,
+    } : null;
 
     if (!afipData?.cae || !afipData?.numeroComprobante) {
       return NextResponse.json(
@@ -64,7 +71,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Construir customer_data desde la venta
-    const clientData = sale.clientData || {};
+    const clientData = sale.client_data || {};
     const customerData: BitCustomerData = {
       name: clientData.name || "Consumidor Final",
       address: clientData.address || "",
@@ -74,9 +81,9 @@ export async function POST(request: NextRequest) {
       doc_type: clientData.cuit ? 80 : 99,
     };
 
-    // Construir items
-    const items = Array.isArray(sale.items) && sale.items.length > 0
-      ? sale.items.map((item: any) => ({
+    // Construir items desde venta_items
+    const items = Array.isArray(sale.venta_items) && sale.venta_items.length > 0
+      ? sale.venta_items.map((item: any) => ({
           name: item.name || "Producto",
           price: item.price || 0,
           quantity: item.quantity || 1,
@@ -104,11 +111,10 @@ export async function POST(request: NextRequest) {
 
     const pdfBase64 = await reimprimirPdf(pdfReq);
 
-    // Actualizar el PDF en Firestore
-    await adminFirestore.collection("ventas").doc(saleId).update({
-      invoicePdfBase64: pdfBase64,
-      updatedAt: new Date().toISOString(),
-    });
+    // Actualizar el PDF en Supabase
+    await supabaseAdmin.from('ventas').update({
+      invoice_pdf_base64: pdfBase64,
+    }).eq('id', saleId);
 
     return NextResponse.json({
       success: true,

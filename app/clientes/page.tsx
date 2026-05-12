@@ -52,7 +52,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 // no router needed — usaremos modal para pagos
-import { auth } from '@/lib/firebase'
+import { supabase } from '@/lib/supabase'
 
 export default function ClientesPage() {
   const [clients, setClients] = useState<Client[]>([])
@@ -96,9 +96,9 @@ export default function ClientesPage() {
     }
     setArcaLoading(true)
     try {
-      const user = auth.currentUser
-      if (!user) throw new Error('No autenticado')
-      const token = await user.getIdToken()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('No autenticado')
+      const token = session.access_token
       const res = await fetch(`/api/afip/cuit?cuit=${cuitLimpio}`, {
         headers: { Authorization: `Bearer ${token}` },
       })

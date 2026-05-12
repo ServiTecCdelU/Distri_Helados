@@ -81,9 +81,14 @@ Siempre hacer commit y push al terminar cada tarea, sin esperar confirmacion del
 - Componentes de tienda en `components/tienda/` (hero-carousel, top-products).
 - Rate limiting en `lib/rate-limit.ts` (in-memory, se resetea en redeploy).
 - Middleware.ts agrega security headers a rutas protegidas.
-- Auditoria en `services/audit-service.ts` -> Firestore collection "auditoria".
-- Listas de precios en `services/price-list-service.ts` -> Firestore collection "listas_precios".
-- Caja diaria en Firestore collection "caja".
+- Auditoria en `services/audit-service.ts` -> Supabase tabla "auditoria".
+- Listas de precios en `services/price-list-service.ts` -> Supabase tabla "listas_precios".
+- Caja diaria en Supabase tabla "caja".
+- Items normalizados en tablas propias: `venta_items`, `pedido_items` (no arrays embebidos).
+- AFIP data en tabla 1:1 `venta_afip_data`.
+- Direcciones de clientes en tabla `cliente_direcciones`.
+- IDs legibles via función PostgreSQL `generate_readable_id()` llamada con `supabase.rpc()`.
+- Balance atómico de clientes via RPC `adjust_client_balance()`.
 
 ## Arquitectura General
 
@@ -91,8 +96,9 @@ Next.js 15 (App Router) desplegado en Vercel. Maneja ventas, pedidos, inventario
 
 ### Stack Tecnologico
 - **Frontend**: Next.js App Router, React 19, Tailwind CSS v4, shadcn/ui (Radix UI primitives)
-- **Database**: Firebase Firestore (collections: `ventas`, `clientes`, `productos`, `vendedores`, `pedidos`, `comisiones`)
-- **Auth**: Firebase Authentication con acceso por roles (`admin`, `seller`, `customer`)
+- **Database**: Supabase (PostgreSQL) — 17 tablas normalizadas con FK, constraints e índices. Schema en `supabase/schema.sql`.
+- **Auth**: Supabase Auth con acceso por roles (`admin`, `seller`, `customer`). Server-side: `lib/supabase-auth-helper.ts`.
+- **Storage**: Supabase Storage bucket `pdfs` para facturas y remitos.
 - **PDF Generation**: `@react-pdf/renderer` client-side; `puppeteer-core` + `@sparticuz/chromium` server-side en `/api/generate-pdf`
 - **Facturacion**: `@afipsdk/afip.js` para AFIP (Facturas A/B/C, CAE)
 - **Notificaciones**: `sonner` para toasts
@@ -102,7 +108,9 @@ Next.js 15 (App Router) desplegado en Vercel. Maneja ventas, pedidos, inventario
 
 ### Utilidades Compartidas
 - **`lib/utils/format.ts`** — formateo centralizado ARS (`formatCurrency`, `formatCurrencyDecimals`) y formatters de fecha/hora. Siempre importar desde aca; no crear instancias `Intl` inline.
-- **`services/firestore-helpers.ts`** — exporta `toDate(value)` que convierte Firestore `Timestamp`, `Date` o string a `Date`. Usar siempre al leer campos de fecha desde Firestore.
+- **`services/supabase-helpers.ts`** — exporta `toDate(value)` (convierte ISO string o Date a Date), `slugify()`, y `generateReadableId()` (llama RPC de PostgreSQL).
+- **`lib/supabase.ts`** — cliente browser de Supabase.
+- **`lib/supabase-admin.ts`** — cliente server con service role (para API routes).
 
 ### Caveats Importantes
 - `next.config.mjs` tiene `typescript.ignoreBuildErrors: true` — errores TS no fallan el build
@@ -110,8 +118,9 @@ Next.js 15 (App Router) desplegado en Vercel. Maneja ventas, pedidos, inventario
 - Tipo `Venta` duplicado: `app/ventas/types.ts` extiende `Sale` (usar en componentes de ventas), `hooks/useVentas.ts` define su version con `afipData` y campos base64. `components/ModalDetalleVenta.tsx` importa `Venta` desde `../types` (resuelve a `app/ventas/types.ts`).
 
 ### Variables de Entorno Requeridas
-- `NEXT_PUBLIC_FIREBASE_*` — Firebase client config
-- `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` — Firebase Admin
+- `NEXT_PUBLIC_SUPABASE_URL` — URL del proyecto Supabase
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Clave anónima de Supabase
+- `SUPABASE_SERVICE_ROLE_KEY` — Clave service role (solo server-side)
 - `BIT_INGENIERIA_CUIT`, `BIT_INGENIERIA_PTO_VTA`, `BIT_INGENIERIA_PRODUCTION` — Bit Ingeniería AFIP
 - `BIT_INGENIERIA_COMPANY_NAME`, `BIT_INGENIERIA_COMPANY_ADDRESS`, `BIT_INGENIERIA_COMPANY_CITY` — datos empresa
 - Credenciales Google Drive para backup de PDFs
