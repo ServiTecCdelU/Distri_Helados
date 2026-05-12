@@ -5,54 +5,91 @@ import type { User } from '@/lib/types'
 import { onAuthChange, signOut } from '@/services/auth-service'
 import { ensureUserProfile } from '@/services/users-service'
 
-export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const processingRef = useRef(false)
-  const lastUidRef = useRef<string | null>(null)
+// ── Store global: una sola suscripción, todos los hooks leen de acá ──
 
-  useEffect(() => {
-    const unsubscribe = onAuthChange(async (supabaseUser) => {
-      if (!supabaseUser) {
-        lastUidRef.current = null
-        setUser(null)
-        setLoading(false)
+let globalUser: User | null = null
+let globalLoading = true
+let listeners: Array<() => void> = []
+let subscribed = false
+
+function notify() {
+  listeners.forEach((fn) => fn())
+}
+
+function subscribe() {
+  if (subscribed) return
+  subscribed = true
+
+  let processing = false
+  let lastUid: string | null = null
+
+  onAuthChange(async (supabaseUser) => {
+    if (!supabaseUser) {
+      lastUid = null
+      globalUser = null
+      globalLoading = false
+      notify()
+      return
+    }
+
+    if (supabaseUser.id === lastUid) {
+      // Ya procesado, solo asegurar que loading sea false
+      if (globalLoading) {
+        globalLoading = false
+        notify()
+      }
+      return
+    }
+    if (processing) return
+    processing = true
+
+    try {
+      const profile = await ensureUserProfile({
+        id: supabaseUser.id,
+        email: supabaseUser.email || '',
+        name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'Usuario',
+      })
+
+      if (!profile.isActive) {
+        lastUid = null
+        globalUser = null
+        globalLoading = false
+        notify()
+        await signOut()
         return
       }
 
-      // Evitar reprocesar el mismo usuario
-      if (supabaseUser.id === lastUidRef.current) return
-      if (processingRef.current) return
-      processingRef.current = true
+      lastUid = supabaseUser.id
+      globalUser = profile
+    } catch (err) {
+      console.error('Error loading profile:', err)
+      globalUser = null
+    } finally {
+      globalLoading = false
+      processing = false
+      notify()
+    }
+  })
+}
 
-      try {
-        const profile = await ensureUserProfile({
-          id: supabaseUser.id,
-          email: supabaseUser.email || '',
-          name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'Usuario',
-        })
+export const useAuth = () => {
+  const [, forceUpdate] = useState(0)
+  const mountedRef = useRef(true)
 
-        if (!profile.isActive) {
-          lastUidRef.current = null
-          await signOut()
-          setUser(null)
-          setLoading(false)
-          return
-        }
+  useEffect(() => {
+    mountedRef.current = true
+    subscribe()
 
-        lastUidRef.current = supabaseUser.id
-        setUser(profile)
-      } catch (err) {
-        console.error('Error loading profile:', err)
-        setUser(null)
-      } finally {
-        setLoading(false)
-        processingRef.current = false
-      }
-    })
+    const listener = () => {
+      if (mountedRef.current) forceUpdate((n) => n + 1)
+    }
+    listeners.push(listener)
 
-    return () => unsubscribe()
+    return () => {
+      mountedRef.current = false
+      listeners = listeners.filter((fn) => fn !== listener)
+    }
   }, [])
 
-  return { user, loading }
+  return { user: globalUser, loading: globalLoading }
 }
