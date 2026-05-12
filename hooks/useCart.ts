@@ -828,7 +828,8 @@ export function useCart(role: UserRole, userEmail?: string) {
             );
           });
 
-        resetCart();
+        setCart([]);
+        if (typeof window !== 'undefined') localStorage.removeItem('cart-items');
         return "sale";
       }
     } catch (error) {
@@ -845,7 +846,7 @@ export function useCart(role: UserRole, userEmail?: string) {
     clientPhone, clientName, clientAddress, selectedSeller, selectedSellerData,
     sellerMatchName, sellers, cart, paymentType, paymentMethod, cashAmount, creditAmountInput,
     finalTotal, discountValue, discountType, newAddress, dniClientId, selectedCity,
-    deliveryLat, deliveryLng, selectedSavedAddress, resetCart,
+    deliveryLat, deliveryLng, selectedSavedAddress,
   ]);
 
   // --- Reset ---
