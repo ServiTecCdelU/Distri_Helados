@@ -715,9 +715,15 @@ export default function PedidosPage() {
     return sortedCities.map((city) => ({ city, orders: groups[city] }));
   }, [filteredOrders]);
 
+  // Lista de carga: solo pedidos que NO están en reparto (delivery) — esos ya salieron en un camión
+  const pendingLoadOrders = useMemo(
+    () => filteredOrders.filter((o) => o.status !== "delivery"),
+    [filteredOrders]
+  );
+
   const cargoList = useMemo(() => {
     const productMap = new Map<string, { name: string; quantity: number }>();
-    filteredOrders.forEach((order) => {
+    pendingLoadOrders.forEach((order) => {
       order.items.forEach((item) => {
         const existing = productMap.get(item.name);
         if (existing) existing.quantity += item.quantity;
@@ -725,7 +731,7 @@ export default function PedidosPage() {
       });
     });
     return Array.from(productMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [filteredOrders]);
+  }, [pendingLoadOrders]);
 
   const uniqueSellers = useMemo(() => {
     const sellersMap = new Map();
@@ -773,12 +779,33 @@ export default function PedidosPage() {
     };
   }, []);
 
+  // Agrupación de pedidos pendientes de carga por ciudad (para imprimir)
+  const cargoGroupedByCity = useMemo(() => {
+    const groups: Record<string, Order[]> = {};
+    pendingLoadOrders.forEach((order) => {
+      const isPickup = (order as any).deliveryMethod === "pickup" || order.address === "Retiro en local";
+      const city = isPickup ? "En el local" : (order.city || "Sin ciudad");
+      if (!groups[city]) groups[city] = [];
+      groups[city].push(order);
+    });
+    Object.keys(groups).forEach((city) => {
+      groups[city].sort((a, b) => (a.address || "").localeCompare(b.address || ""));
+    });
+    const sortedCities = Object.keys(groups).sort((a, b) => {
+      if (a === "En el local") return -1;
+      if (b === "En el local") return 1;
+      if (a === "Sin ciudad") return 1;
+      if (b === "Sin ciudad") return -1;
+      return a.localeCompare(b);
+    });
+    return sortedCities.map((city) => ({ city, orders: groups[city] }));
+  }, [pendingLoadOrders]);
+
   const handlePrintCargo = useCallback(() => {
     const now = new Date();
     const dateStr = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "long", year: "numeric" }).format(now);
     const remitoNum = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}-${String(Math.floor(Math.random()*9000)+1000)}`;
     const stampStr = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(now);
-    // cargoList y ordersGroupedByCity se leen del closure
     let html = `<!DOCTYPE html><html><head><title>Listado de Carga</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;padding:24px;font-size:13px}table{width:100%;border-collapse:collapse}th,td{padding:7px 12px;border-bottom:1px solid #f3f4f6}th{font-size:11px;font-weight:600;color:#4b5563;background:#f9fafb;border-bottom:1px solid #e5e7eb}td.right{text-align:right}th.right{text-align:right}th.center,td.center{text-align:center}.checkbox{display:inline-block;width:14px;height:14px;border:2px solid #9ca3af;border-radius:2px}.city-header{background:#1f2937;color:white;padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase}.section{border:1px solid #d1d5db;border-radius:8px;overflow:hidden;margin-bottom:16px}.section-title{background:#f3f4f6;padding:8px 12px;border-bottom:1px solid #d1d5db;font-size:10px;font-weight:700;text-transform:uppercase;color:#374151}.tfoot td{border-top:2px solid #d1d5db;background:#f3f4f6;font-weight:700}.stop{display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border-bottom:1px solid #e5e7eb}.stop-num{flex-shrink:0;width:26px;height:26px;border-radius:50%;background:#1f2937;color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}.footer{margin-top:16px;text-align:center;font-size:10px;color:#9ca3af}@media print{body{padding:16px}}</style></head><body>`;
     html += `<h2 style="margin-bottom:16px;font-size:18px">Listado de Carga — ${dateStr} | N° ${remitoNum}</h2>`;
     html += `<div class="section"><div class="section-title">Mercadería</div><table><thead><tr><th style="width:40px">N°</th><th>Producto</th><th class="right" style="width:70px">Cant.</th><th class="center" style="width:50px">OK</th></tr></thead><tbody>`;
@@ -787,7 +814,7 @@ export default function PedidosPage() {
     });
     html += `</tbody><tr class="tfoot"><td></td><td>${cargoList.length} productos</td><td class="right">${cargoList.reduce((a,i)=>a+i.quantity,0)}</td><td></td></tr></table></div>`;
     html += `<div class="section"><div class="section-title">Ruta de Entrega</div>`;
-    ordersGroupedByCity.forEach(({ city, orders: cityOrders }) => {
+    cargoGroupedByCity.forEach(({ city, orders: cityOrders }) => {
       html += `<div class="city-header">${city} — ${cityOrders.length} entregas</div>`;
       cityOrders.forEach((order, idx) => {
         html += `<div class="stop"><div class="stop-num">${idx+1}</div><div style="flex:1"><div style="display:flex;justify-content:space-between"><strong>${order.clientName||"Sin cliente"}</strong><span class="checkbox"></span></div><div style="font-size:11px;color:#4b5563;margin-top:2px">${order.address||""}</div><div style="margin-top:4px;font-size:11px">${order.items.map(it=>`<strong>${it.quantity}</strong>×${it.name}`).join(" | ")}</div></div></div>`;
@@ -795,7 +822,7 @@ export default function PedidosPage() {
     });
     html += `</div><div class="footer">Generado el ${stampStr}</div></body></html>`;
     printHtml(html);
-  }, [cargoList, ordersGroupedByCity, printHtml]);
+  }, [cargoList, cargoGroupedByCity, printHtml]);
 
   const handleBulkAssign = useCallback(async () => {
     if (!bulkTransportistaId || selectedOrderIds.size === 0) return;
@@ -885,7 +912,7 @@ export default function PedidosPage() {
               variant="outline"
               size="sm"
               onClick={handlePrintCargo}
-              disabled={filteredOrders.length === 0}
+              disabled={pendingLoadOrders.length === 0}
               className="gap-2"
             >
               <ClipboardList className="h-4 w-4" />
