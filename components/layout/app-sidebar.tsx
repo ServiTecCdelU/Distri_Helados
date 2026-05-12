@@ -167,14 +167,15 @@ export function AppSidebar() {
 
         {/* Footer (Fijo al fondo) */}
         <div className="p-4 border-t border-sidebar-border space-y-3 bg-sidebar">
-          <Link
+          {/* Inicio/Tienda ocultado - usuarios son vendedores y admin */}
+          {/* <Link
             href="/tienda"
             onClick={() => setMobileOpen(false)}
             className="flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 transition-colors"
           >
             <Home className="h-5 w-5" />
             Inicio
-          </Link>
+          </Link> */}
 
           {user && (
             <div className="flex items-center gap-3 p-3 rounded-xl bg-sidebar-accent/30 border border-sidebar-border/50">
