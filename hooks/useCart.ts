@@ -828,6 +828,7 @@ export function useCart(role: UserRole, userEmail?: string) {
             );
           });
 
+        resetCart();
         return "sale";
       }
     } catch (error) {
@@ -844,7 +845,7 @@ export function useCart(role: UserRole, userEmail?: string) {
     clientPhone, clientName, clientAddress, selectedSeller, selectedSellerData,
     sellerMatchName, sellers, cart, paymentType, paymentMethod, cashAmount, creditAmountInput,
     finalTotal, discountValue, discountType, newAddress, dniClientId, selectedCity,
-    deliveryLat, deliveryLng, selectedSavedAddress,
+    deliveryLat, deliveryLng, selectedSavedAddress, resetCart,
   ]);
 
   // --- Reset ---
