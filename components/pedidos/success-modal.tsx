@@ -82,9 +82,9 @@ export function SuccessModal({
             <CheckCircle className="h-10 w-10 text-white" />
           </div>
 
-          <h2 className="text-2xl font-bold mb-1">¡Pedido Completado!</h2>
+          <h2 className="text-2xl font-bold mb-1">¡Venta Exitosa!</h2>
           <p className="text-green-100">
-            El pedido se convirtió en una venta exitosamente
+            La venta se registró correctamente
           </p>
         </div>
 
