@@ -200,17 +200,6 @@ function NuevaVentaContent({
                 </div>
 
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <Button variant="outline" className="h-10 text-sm gap-2" onClick={() => router.push(`/ventas?saleId=${state.lastSaleId}`)}>
-                      <FileText className="h-4 w-4" /> Boleta
-                    </Button>
-                    <Button variant="outline" className="h-10 text-sm gap-2" onClick={() => router.push(`/ventas?saleId=${state.lastSaleId}`)}>
-                      <Receipt className="h-4 w-4" /> Remito
-                    </Button>
-                  </div>
-                  <Button variant="outline" className="w-full h-10 text-sm gap-2" onClick={() => router.push("/ventas")}>
-                    <Eye className="h-4 w-4" /> Mis Ventas
-                  </Button>
                   <Button className="w-full h-10 text-sm gap-2 shadow-md" onClick={actions.resetCart}>
                     <Plus className="h-4 w-4" /> Nueva Venta
                   </Button>

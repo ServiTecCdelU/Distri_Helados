@@ -135,17 +135,9 @@ export function SuccessModal({
             )}
           </div>
 
-          <div className="space-y-3 pt-2">
-            <Button
-              onClick={onGoToSale}
-              className="w-full h-12 text-base font-semibold bg-gray-900 hover:bg-gray-800 shadow-lg hover:shadow-xl transition-all"
-            >
-              <ArrowRight className="h-5 w-5 mr-2" />
-              Ver Venta y Emitir Documentos
-            </Button>
-
+          <div className="pt-2">
             <Button variant="outline" onClick={onClose} className="w-full h-11">
-              Cerrar y seguir trabajando
+              Cerrar
             </Button>
           </div>
         </div>
