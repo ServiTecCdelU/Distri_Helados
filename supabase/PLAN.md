@@ -15,7 +15,7 @@
 | 4 | Servicios de datos | ✅ COMPLETADA |
 | 5 | Hooks y uso directo Firestore | ✅ COMPLETADA |
 | 6 | API Routes (preparación) | ✅ COMPLETADA |
-| 7 | Storage (PDFs) | ⬜ PENDIENTE |
+| 7 | Storage (PDFs) | ✅ COMPLETADA |
 | 8 | Switch (reemplazar imports) | ⬜ PENDIENTE |
 | 9 | Cleanup (borrar Firebase) | ⬜ PENDIENTE |
 
@@ -258,12 +258,16 @@ Cambios clave vs Firebase:
 
 ---
 
-## Fase 7: Storage ⬜ PENDIENTE
+## Fase 7: Storage ✅ COMPLETADA
 
-- Crear bucket `pdfs` en Supabase Storage
-- Crear `lib/supabase-storage.ts` (reemplaza `lib/storage.ts`)
-- `uploadPDF()` → `supabase.storage.from('pdfs').upload(path, buffer)`
-- Oportunidad: dejar de guardar base64 en tabla, solo URL
+**Archivo creado:** `lib/supabase-storage.ts`
+- Misma interfaz que `lib/storage.ts` (drop-in replacement)
+- Bucket: `pdfs`
+- `uploadPDF` usa `supabase.storage.from('pdfs').upload()` con `upsert: true`
+- `deleteFile` usa `supabase.storage.from('pdfs').remove()`
+- Retorna URL pública via `getPublicUrl()`
+
+**Prerequisito:** Crear bucket `pdfs` en Supabase Dashboard → Storage con política pública de lectura
 
 ---
 
