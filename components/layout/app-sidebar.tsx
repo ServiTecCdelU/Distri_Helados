@@ -40,7 +40,7 @@ export function AppSidebar() {
 
 
   const navItems = [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
+    // { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
     { href: "/productos", label: "Productos", icon: Package, roles: ["admin"] },
     { href: "/clientes", label: "Clientes", icon: Users, roles: ["admin"] },
     {
@@ -54,7 +54,7 @@ export function AppSidebar() {
     { href: "/pedidos", label: "Pedidos", icon: Truck, roles: ["admin", ...(isTransportista ? ["seller"] : [])] },
     // { href: "/transporte", label: "Transporte", icon: MapPin, roles: ["admin", ...(isTransportista ? ["seller"] : [])] },
     { href: "/comisiones", label: "Mis Comisiones", icon: Banknote, roles: ["seller"] },
-    // { href: "/caja", label: "Caja Diaria", icon: Banknote, roles: ["admin"] },
+    { href: "/caja", label: "Caja Diaria", icon: Banknote, roles: ["admin"] },
     // { href: "/reportes", label: "Reportes", icon: BarChart3, roles: ["admin"] },
     // { href: "/listas-precios", label: "Listas de Precios", icon: Tag, roles: ["admin"] },
     // { href: "/auditoria", label: "Auditoria", icon: Shield, roles: ["admin"] },

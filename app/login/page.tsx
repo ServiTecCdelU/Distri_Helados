@@ -17,7 +17,7 @@ function getHomeRoute(user: User): string {
     if (user.employeeType === 'transportista') return '/pedidos'
     return '/ventas/nueva'
   }
-  return '/dashboard'
+  return '/caja'
 }
 
 export default function LoginPage() {
