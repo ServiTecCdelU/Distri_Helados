@@ -124,6 +124,12 @@ export function ListaVentas({
   clients = [],
   sellers = [],
   isAdmin = false,
+  totalCount: totalCountProp,
+  currentPage: currentPageProp,
+  onPageChange,
+  pageSize: pageSizeProp,
+  onPageSizeChange,
+  onLoadAllForExport,
 }: ListaVentasProps) {
   const {
     searchQuery, invoiceFilter, paymentFilter, periodFilter, dateFrom, dateTo,
@@ -160,15 +166,21 @@ export function ListaVentas({
 
   const hayFiltrosActivos = !!(searchQuery || activeFilterCount > 0);
 
-  // ─── paginación ───────────────────────────────────────────────────────────
-  const [pageSize, setPageSize] = useState(20);
-  const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = Math.ceil(ventas.length / pageSize);
-  const ventasPaginadas = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return ventas.slice(start, start + pageSize);
-  }, [ventas, currentPage, pageSize]);
-  useMemo(() => { setCurrentPage(1); }, [ventas.length]);
+  // ─── paginación (server-side si hay props, fallback client-side) ─────────
+  const serverPagination = totalCountProp !== undefined && onPageChange;
+  const [localPageSize, setLocalPageSize] = useState(20);
+  const [localCurrentPage, setLocalCurrentPage] = useState(1);
+  const pageSize = serverPagination ? (pageSizeProp ?? 10) : localPageSize;
+  const currentPage = serverPagination ? (currentPageProp ?? 1) : localCurrentPage;
+  const setCurrentPage = serverPagination ? onPageChange! : setLocalCurrentPage;
+  const setPageSize = serverPagination
+    ? (n: number) => { onPageSizeChange?.(n); onPageChange!(1); }
+    : (n: number) => { setLocalPageSize(n); setLocalCurrentPage(1); };
+  const totalRecords = serverPagination ? totalCountProp! : ventas.length;
+  const totalPages = Math.ceil(totalRecords / pageSize);
+  const ventasPaginadas = serverPagination
+    ? ventas
+    : ventas.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
 
   // ─── modal filtros mobile ─────────────────────────────────────────────────
   const [filterModalOpen, setFilterModalOpen] = useState(false);
@@ -184,8 +196,10 @@ export function ListaVentas({
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
 
-  const exportCSV = useCallback(() => {
-    let ventasToExport = [...ventas];
+  const exportCSV = useCallback(async () => {
+    let ventasToExport = serverPagination && onLoadAllForExport
+      ? await onLoadAllForExport()
+      : [...ventas];
     if (exportPeriod !== "all" && exportPeriod !== "custom") {
       const now = new Date();
       ventasToExport = ventasToExport.filter((v) => {
@@ -484,10 +498,10 @@ export function ListaVentas({
       </Card>
 
       {/* Paginación */}
-      {ventas.length > 0 && (
+      {totalRecords > 0 && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-2 pt-3 border-t border-border px-2">
           <p className="text-xs text-muted-foreground">
-            {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, ventas.length)} de {ventas.length}
+            {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalRecords)} de {totalRecords}
           </p>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
@@ -495,13 +509,13 @@ export function ListaVentas({
               {[10, 20, 50, 100].map(n => (
                 <button
                   key={n}
-                  onClick={() => { setPageSize(n); setCurrentPage(1); }}
+                  onClick={() => setPageSize(n)}
                   className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${pageSize === n ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/50 text-muted-foreground hover:text-foreground"}`}
                 >{n}</button>
               ))}
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Ant.</Button>
+              <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={currentPage === 1} onClick={() => setCurrentPage(currentPage - 1)}>Ant.</Button>
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
                 .reduce<(number | string)[]>((acc, p, i, arr) => {
@@ -512,7 +526,7 @@ export function ListaVentas({
                   ? <span key={`dot-${i}`} className="px-1 text-muted-foreground text-xs">…</span>
                   : <Button key={p} variant={p === currentPage ? "default" : "outline"} size="sm" className="h-7 w-7 p-0 text-xs" onClick={() => setCurrentPage(p)}>{p}</Button>
                 )}
-              <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)}>Sig.</Button>
+              <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(currentPage + 1)}>Sig.</Button>
             </div>
           </div>
         </div>

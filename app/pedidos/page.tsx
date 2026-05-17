@@ -1,7 +1,7 @@
 //app\pedidos\page.tsx
 "use client";
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { MainLayout } from "@/components/layout/main-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -88,7 +88,15 @@ export default function PedidosPage() {
   const [filterSeller, setFilterSeller] = useState<string>("");
   const [filterCity, setFilterCity] = useState<string>("");
   const [filterTransportista, setFilterTransportista] = useState<string>("");
+  const [searchInput, setSearchInput] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setSearchQuery(value), 400);
+  };
 
   // Modales
   const [activeModal, setActiveModal] = useState<
@@ -130,28 +138,40 @@ export default function PedidosPage() {
     client?: Client;
   } | null>(null);
 
-  const loadData = useCallback(async (isMounted?: () => boolean) => {
+  // Cargar pedidos con filtros server-side (sin limit, pedidos activos suelen ser pocos)
+  const fetchOrders = useCallback(async () => {
     try {
-      const [ordersData, clientsData, sellersData] = await Promise.all([
-        ordersApi.getAll(),
+      setLoading(true);
+      // Pedidos activos (excluir completados) con filtros server-side
+      const result = await ordersApi.getPaginated(200, 0, {
+        search: searchQuery || undefined,
+        status: filterStatus !== "all" ? filterStatus : undefined,
+        sellerId: filterSeller || undefined,
+        clientId: filterClient || undefined,
+        city: filterCity || undefined,
+        transportistaId: filterTransportista || undefined,
+        dateFrom: filterDateFrom || undefined,
+        dateTo: filterDateTo || undefined,
+      });
+      // Filtrar completados client-side (más seguro)
+      setOrders(result.data.filter(o => o.status !== "completed"));
+    } catch {
+      // silenciado
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, filterStatus, filterSeller, filterClient, filterCity, filterTransportista, filterDateFrom, filterDateTo]);
+
+  // Cargar clientes y sellers (pocos, para dropdowns)
+  const loadDropdownData = useCallback(async () => {
+    try {
+      const [clientsData, sellersData] = await Promise.all([
         clientsApi.getAll(),
         sellersApi.getAll(),
       ]);
-      if (isMounted && !isMounted()) return;
-      const sortedOrders = ordersData.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-      setOrders(sortedOrders);
       setClients(clientsData);
       setSellers(sellersData);
-    } catch (error) {
-      if (isMounted && !isMounted()) return;
-      console.error("[pedidos] Error cargando datos:", error);
-    } finally {
-      if (isMounted && !isMounted()) return;
-      setLoading(false);
-    }
+    } catch {}
   }, []);
 
   // Load extra cities from Firestore
@@ -377,15 +397,16 @@ export default function PedidosPage() {
   }, [detailOrder]);
 
   useEffect(() => {
-    let active = true;
     setMounted(true);
-    loadData(() => active);
+    loadDropdownData();
+  }, [loadDropdownData]);
 
-    // Refrescar datos al volver a la pestaña (ej: después de crear pedido desde carrito)
-    const onFocus = () => { loadData(); };
+  useEffect(() => {
+    fetchOrders();
+    const onFocus = () => { fetchOrders(); };
     window.addEventListener('focus', onFocus);
-    return () => { active = false; window.removeEventListener('focus', onFocus); };
-  }, [loadData]);
+    return () => { window.removeEventListener('focus', onFocus); };
+  }, [fetchOrders]);
 
   useEffect(() => {
     if (selectedOrder?.clientId) {
@@ -548,6 +569,9 @@ export default function PedidosPage() {
         client,
       });
 
+      // Recargar pedidos del server
+      fetchOrders();
+
       // React 18 batchea múltiples setState — no hace falta setTimeout
       setActiveModal("success");
       setSelectedOrder(null);
@@ -595,6 +619,7 @@ export default function PedidosPage() {
     setFilterSeller("");
     setFilterCity("");
     setFilterTransportista("");
+    setSearchInput("");
     setSearchQuery("");
   }, []);
 
@@ -607,7 +632,7 @@ export default function PedidosPage() {
       filterSeller ||
       filterCity ||
       filterTransportista ||
-      searchQuery
+      searchInput
     );
   }, [
     filterStatus,
@@ -617,78 +642,11 @@ export default function PedidosPage() {
     filterSeller,
     filterCity,
     filterTransportista,
-    searchQuery,
+    searchInput,
   ]);
 
-  const filteredOrders = useMemo(() => {
-    // Completados van a Ventas — no aparecen en Pedidos
-    let filtered = orders.filter((o) => o.status !== "completed");
-
-    if (filterStatus !== "all") {
-      filtered = filtered.filter((o) => o.status === filterStatus);
-    }
-
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((o) => {
-        if (o.clientName?.toLowerCase().includes(query)) return true;
-        if (o.sellerName?.toLowerCase().includes(query)) return true;
-        if (o.id.toLowerCase().includes(query)) return true;
-        // buscar por nombre en la lista de clientes si el pedido tiene clientId
-        if (o.clientId) {
-          const client = clients.find((c) => c.id === o.clientId);
-          if (client?.name?.toLowerCase().includes(query)) return true;
-        }
-        return false;
-      });
-    }
-
-    if (filterClient) {
-      filtered = filtered.filter((o) => o.clientId === filterClient);
-    }
-
-    if (filterSeller) {
-      filtered = filtered.filter((o) => o.sellerId === filterSeller);
-    }
-
-    if (filterCity) {
-      filtered = filtered.filter((o) => o.city === filterCity);
-    }
-
-    if (filterTransportista) {
-      if (filterTransportista === "unassigned") {
-        filtered = filtered.filter((o) => !o.transportistaId);
-      } else {
-        filtered = filtered.filter((o) => o.transportistaId === filterTransportista);
-      }
-    }
-
-    if (filterDateFrom) {
-      const fromDate = new Date(filterDateFrom);
-      fromDate.setHours(0, 0, 0, 0);
-      filtered = filtered.filter((o) => new Date(o.createdAt) >= fromDate);
-    }
-
-    if (filterDateTo) {
-      const toDate = new Date(filterDateTo);
-      toDate.setHours(23, 59, 59, 999);
-      filtered = filtered.filter((o) => new Date(o.createdAt) <= toDate);
-    }
-
-    return filtered;
-  }, [
-    orders,
-    clients,
-    filterStatus,
-    searchQuery,
-    filterClient,
-    filterSeller,
-    filterDateFrom,
-    filterDateTo,
-    filterCity,
-    filterTransportista,
-    user,
-  ]);
+  // Los pedidos ya vienen filtrados del server
+  const filteredOrders = orders;
 
   const allCities = useMemo(() => [...CITIES, ...extraCities.filter(c => !CITIES.includes(c as any))], [extraCities]);
 
@@ -845,7 +803,7 @@ export default function PedidosPage() {
           ordersApi.assignTransportista(id, transportista.id, transportista.name)
         )
       );
-      await loadData();
+      await fetchOrders();
       setSelectedOrderIds(new Set());
       setBulkTransportistaId("");
     } catch (e) {
@@ -853,7 +811,7 @@ export default function PedidosPage() {
     } finally {
       setBulkAssigning(false);
     }
-  }, [bulkTransportistaId, selectedOrderIds, sellers, loadData]);
+  }, [bulkTransportistaId, selectedOrderIds, sellers, fetchOrders]);
 
   if (!mounted) {
     return (
@@ -875,13 +833,13 @@ export default function PedidosPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar por cliente, vendedor o ID..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={searchInput}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 className="pl-9"
               />
-              {searchQuery && (
+              {searchInput && (
                 <button
-                  onClick={() => setSearchQuery("")}
+                  onClick={() => { setSearchInput(""); setSearchQuery(""); }}
                   className="absolute right-3 top-1/2 -translate-y-1/2"
                 >
                   <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />

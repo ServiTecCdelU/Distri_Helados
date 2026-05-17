@@ -38,6 +38,12 @@ function VentasInner() {
 
   const {
     ventasFiltradas,
+    totalCount,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    cargarTodasParaExport,
     cargando,
     filtros,
     actualizarFiltros,
@@ -84,6 +90,12 @@ function VentasInner() {
         clients={clients}
         sellers={user?.role === "admin" ? sellers : []}
         isAdmin={user?.role === "admin"}
+        totalCount={totalCount}
+        currentPage={currentPage}
+        onPageChange={setCurrentPage}
+        pageSize={pageSize}
+        onPageSizeChange={setPageSize}
+        onLoadAllForExport={cargarTodasParaExport}
       />
 
       <ModalDetalleVenta

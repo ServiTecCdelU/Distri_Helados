@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { savePdfToDatabase, downloadBase64Pdf } from "@/services/pdf-service";
 import { toast } from "sonner";
@@ -169,6 +169,7 @@ function mapVentaRow(row: any): Venta {
 
 export function useVentas(filterBySellerId?: string, clientCityMap?: Record<string, string>) {
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [cargando, setCargando] = useState(true);
   const [filtros, setFiltros] = useState<FiltrosVentas>({
     searchQuery: "",
@@ -185,6 +186,14 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
     deliveryFilter: "all",
   });
 
+  // Paginación server-side
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Debounce de búsqueda
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
   const [modalDetalleAbierto, setModalDetalleAbierto] = useState(false);
   const [ventaSeleccionada, setVentaSeleccionada] = useState<Venta | null>(null);
   const [modalEmitirAbierto, setModalEmitirAbierto] = useState(false);
@@ -192,124 +201,170 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
   const [tipoDocumento, setTipoDocumento] = useState<"boleta" | "remito">("boleta");
   const [emitiendo, setEmitiendo] = useState(false);
 
-  // Cargar ventas con JOIN a venta_items y venta_afip_data
+  // Calcular rango de fechas para filtros de período
+  const getDateRangeFromPeriod = (period: string): { from?: string; to?: string } => {
+    if (period === "all") return {};
+    const now = new Date();
+    if (period === "today") {
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+      return { from: today.toISOString() };
+    }
+    if (period === "week") {
+      const weekAgo = new Date(now);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      weekAgo.setHours(0, 0, 0, 0);
+      return { from: weekAgo.toISOString() };
+    }
+    if (period === "month") {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from: monthStart.toISOString() };
+    }
+    if (period === "year") {
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      return { from: yearStart.toISOString() };
+    }
+    return {};
+  };
+
+  // Cargar ventas con paginación y filtros server-side
   const cargarVentas = useCallback(async () => {
     try {
       setCargando(true);
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+
       let q = supabase
         .from('ventas')
-        .select('*, venta_items(*), venta_afip_data(*)')
-        .order('created_at', { ascending: false })
-        .limit(200);
+        .select('*, venta_items(*), venta_afip_data(*)', { count: 'exact' })
+        .order('created_at', { ascending: false });
 
-      if (filterBySellerId) {
-        q = q.eq('seller_id', filterBySellerId);
+      if (filterBySellerId) q = q.eq('seller_id', filterBySellerId);
+
+      // Búsqueda
+      if (debouncedSearch) {
+        q = q.or(`client_name.ilike.%${debouncedSearch}%,seller_name.ilike.%${debouncedSearch}%,id.ilike.%${debouncedSearch}%,invoice_number.ilike.%${debouncedSearch}%`);
       }
 
-      const { data, error } = await q;
+      // Filtros de pago
+      if (filtros.paymentFilter !== "all") q = q.eq('payment_type', filtros.paymentFilter);
+
+      // Filtros de factura
+      if (filtros.invoiceFilter === "emitted") q = q.eq('invoice_emitted', true);
+      else if (filtros.invoiceFilter === "pending") q = q.or('invoice_emitted.is.null,invoice_emitted.eq.false');
+
+      // Filtros de remito
+      if (filtros.remitoFilter === "emitted") q = q.not('remito_number', 'is', null);
+      else if (filtros.remitoFilter === "pending") q = q.is('remito_number', null);
+
+      // Filtros de descuento
+      if (filtros.discountFilter === "with") q = q.gt('discount', 0);
+      else if (filtros.discountFilter === "without") q = q.or('discount.is.null,discount.eq.0');
+
+      // Filtro por cliente
+      if (filtros.clientId) q = q.eq('client_id', filtros.clientId);
+
+      // Filtro por vendedor
+      if (filtros.sellerId) q = q.eq('seller_id', filtros.sellerId);
+
+      // Filtro por método de entrega
+      if (filtros.deliveryFilter && filtros.deliveryFilter !== "all") {
+        q = q.eq('delivery_method', filtros.deliveryFilter);
+      }
+
+      // Filtros de fecha (período o rango personalizado)
+      if (filtros.periodFilter !== "all" && filtros.periodFilter !== "custom") {
+        const range = getDateRangeFromPeriod(filtros.periodFilter);
+        if (range.from) q = q.gte('created_at', range.from);
+      }
+      if (filtros.dateFrom) q = q.gte('created_at', filtros.dateFrom);
+      if (filtros.dateTo) q = q.lte('created_at', new Date(filtros.dateTo + 'T23:59:59').toISOString());
+
+      // Filtro por ciudad (vía clientCityMap, necesita client-side ya que city no está en ventas)
+      // Se aplica post-query si es necesario
+
+      q = q.range(from, to);
+
+      const { data, error, count } = await q;
       if (error) throw error;
-      setVentas((data || []).map(mapVentaRow));
+      let rows = (data || []).map(mapVentaRow);
+
+      // Filtro de ciudad post-query (city no es columna de ventas)
+      if (filtros.city && clientCityMap) {
+        rows = rows.filter(v => {
+          const ventaCity = v.clientId ? clientCityMap[v.clientId] : undefined;
+          return ventaCity === filtros.city;
+        });
+      }
+
+      setVentas(rows);
+      setTotalCount(count ?? 0);
     } catch {
       toast.error("Error al cargar ventas");
     } finally {
       setCargando(false);
     }
-  }, [filterBySellerId]);
+  }, [filterBySellerId, currentPage, pageSize, debouncedSearch, filtros, clientCityMap]);
 
   useEffect(() => {
     cargarVentas();
   }, [cargarVentas]);
 
-  // Filtrado memoizado
-  const ventasFiltradas = useMemo(() => {
-    return ventas.filter((venta) => {
-      if (filtros.searchQuery) {
-        const q = filtros.searchQuery.toLowerCase();
-        const matchSearch =
-          venta.clientName?.toLowerCase().includes(q) ||
-          venta.sellerName?.toLowerCase().includes(q) ||
-          venta.id.toLowerCase().includes(q) ||
-          venta.invoiceNumber?.toLowerCase().includes(q) ||
-          String(venta.saleNumber || "").toLowerCase().includes(q);
-        if (!matchSearch) return false;
+  // Reset page cuando cambian filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, filtros.paymentFilter, filtros.invoiceFilter, filtros.remitoFilter, filtros.discountFilter, filtros.periodFilter, filtros.dateFrom, filtros.dateTo, filtros.clientId, filtros.sellerId, filtros.city, filtros.deliveryFilter]);
+
+  // Las ventas ya vienen filtradas y paginadas del server
+  const ventasFiltradas = ventas;
+
+  // Cargar todas las ventas para export CSV (sin paginación)
+  const cargarTodasParaExport = useCallback(async (): Promise<Venta[]> => {
+    try {
+      let q = supabase
+        .from('ventas')
+        .select('*, venta_items(*), venta_afip_data(*)')
+        .order('created_at', { ascending: false });
+
+      if (filterBySellerId) q = q.eq('seller_id', filterBySellerId);
+      if (debouncedSearch) {
+        q = q.or(`client_name.ilike.%${debouncedSearch}%,seller_name.ilike.%${debouncedSearch}%,id.ilike.%${debouncedSearch}%,invoice_number.ilike.%${debouncedSearch}%`);
       }
-
-      if (filtros.periodFilter && filtros.periodFilter !== "all") {
-        const ventaDate = safeGetDate(venta.createdAt);
-        if (ventaDate) {
-          const now = new Date();
-          if (filtros.periodFilter === "today") {
-            const today = new Date(now);
-            today.setHours(0, 0, 0, 0);
-            if (ventaDate < today) return false;
-          } else if (filtros.periodFilter === "week") {
-            const weekAgo = new Date(now);
-            weekAgo.setDate(weekAgo.getDate() - 7);
-            weekAgo.setHours(0, 0, 0, 0);
-            if (ventaDate < weekAgo) return false;
-          } else if (filtros.periodFilter === "month") {
-            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-            if (ventaDate < monthStart) return false;
-          } else if (filtros.periodFilter === "year") {
-            const yearStart = new Date(now.getFullYear(), 0, 1);
-            if (ventaDate < yearStart) return false;
-          }
-        }
+      if (filtros.paymentFilter !== "all") q = q.eq('payment_type', filtros.paymentFilter);
+      if (filtros.invoiceFilter === "emitted") q = q.eq('invoice_emitted', true);
+      else if (filtros.invoiceFilter === "pending") q = q.or('invoice_emitted.is.null,invoice_emitted.eq.false');
+      if (filtros.remitoFilter === "emitted") q = q.not('remito_number', 'is', null);
+      else if (filtros.remitoFilter === "pending") q = q.is('remito_number', null);
+      if (filtros.discountFilter === "with") q = q.gt('discount', 0);
+      else if (filtros.discountFilter === "without") q = q.or('discount.is.null,discount.eq.0');
+      if (filtros.clientId) q = q.eq('client_id', filtros.clientId);
+      if (filtros.sellerId) q = q.eq('seller_id', filtros.sellerId);
+      if (filtros.deliveryFilter && filtros.deliveryFilter !== "all") q = q.eq('delivery_method', filtros.deliveryFilter);
+      if (filtros.periodFilter !== "all" && filtros.periodFilter !== "custom") {
+        const range = getDateRangeFromPeriod(filtros.periodFilter);
+        if (range.from) q = q.gte('created_at', range.from);
       }
+      if (filtros.dateFrom) q = q.gte('created_at', filtros.dateFrom);
+      if (filtros.dateTo) q = q.lte('created_at', new Date(filtros.dateTo + 'T23:59:59').toISOString());
 
-      if (filtros.dateFrom) {
-        const ventaDate = safeGetDate(venta.createdAt);
-        const fromDate = new Date(filtros.dateFrom);
-        fromDate.setHours(0, 0, 0, 0);
-        if (!ventaDate || ventaDate < fromDate) return false;
-      }
-
-      if (filtros.dateTo) {
-        const ventaDate = safeGetDate(venta.createdAt);
-        const toDate = new Date(filtros.dateTo);
-        toDate.setHours(23, 59, 59, 999);
-        if (!ventaDate || ventaDate > toDate) return false;
-      }
-
-      if (filtros.paymentFilter !== "all" && venta.paymentType !== filtros.paymentFilter) return false;
-
-      if (filtros.invoiceFilter !== "all") {
-        if (filtros.invoiceFilter === "emitted" && !venta.invoiceEmitted) return false;
-        if (filtros.invoiceFilter === "pending" && venta.invoiceEmitted) return false;
-      }
-
-      if (filtros.remitoFilter && filtros.remitoFilter !== "all") {
-        const tieneRemito = !!venta.remitoNumber;
-        if (filtros.remitoFilter === "emitted" && !tieneRemito) return false;
-        if (filtros.remitoFilter === "pending" && tieneRemito) return false;
-      }
-
-      if (filtros.discountFilter && filtros.discountFilter !== "all") {
-        const tieneDescuento = !!(venta.discount && venta.discount > 0)
-          || (venta.items || []).some((i) => i.itemDiscount && i.itemDiscount > 0);
-        if (filtros.discountFilter === "with" && !tieneDescuento) return false;
-        if (filtros.discountFilter === "without" && tieneDescuento) return false;
-      }
-
-      if (filtros.clientId && venta.clientId !== filtros.clientId) return false;
-
-      if (filtros.sellerId && (venta as any).sellerId !== filtros.sellerId) return false;
-
-      if (filtros.city && clientCityMap) {
-        const ventaCity = venta.clientId ? clientCityMap[venta.clientId] : undefined;
-        if (ventaCity !== filtros.city) return false;
-      }
-
-      if (filtros.deliveryFilter && filtros.deliveryFilter !== "all") {
-        if ((venta as any).deliveryMethod !== filtros.deliveryFilter) return false;
-      }
-
-      return true;
-    });
-  }, [ventas, filtros, clientCityMap]);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data || []).map(mapVentaRow);
+    } catch {
+      toast.error("Error al cargar ventas para exportar");
+      return [];
+    }
+  }, [filterBySellerId, debouncedSearch, filtros]);
 
   const actualizarFiltros = useCallback((nuevosFiltros: Partial<FiltrosVentas>) => {
     setFiltros((prev) => ({ ...prev, ...nuevosFiltros }));
+    // Debounce para searchQuery
+    if ('searchQuery' in nuevosFiltros) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        setDebouncedSearch(nuevosFiltros.searchQuery || "");
+      }, 400);
+    }
   }, []);
 
   // Modales
@@ -731,10 +786,16 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
   return {
     ventas,
     ventasFiltradas,
+    totalCount,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
     cargando,
     filtros,
     actualizarFiltros,
     recargar: cargarVentas,
+    cargarTodasParaExport,
     modalDetalleAbierto,
     ventaSeleccionada,
     abrirDetalle,

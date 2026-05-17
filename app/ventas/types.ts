@@ -64,4 +64,10 @@ export interface ListaVentasProps {
   clients?: { id: string; name: string; city?: string }[];
   sellers?: { id: string; name: string }[];
   isAdmin?: boolean;
+  totalCount?: number;
+  currentPage?: number;
+  onPageChange?: (page: number) => void;
+  pageSize?: number;
+  onPageSizeChange?: (size: number) => void;
+  onLoadAllForExport?: () => Promise<any[]>;
 }
