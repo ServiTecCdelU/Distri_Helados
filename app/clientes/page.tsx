@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -56,20 +56,30 @@ import { supabase } from '@/lib/supabase'
 
 export default function ClientesPage() {
   const [clients, setClients] = useState<Client[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const debounceRef = useRef<NodeJS.Timeout | null>(null)
+
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => setSearchQuery(value), 400)
+  }
+
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [debtFilter, setDebtFilter] = useState<string>('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingClient, setEditingClient] = useState<Client | null>(null)
-  
+
   // Detail modal state
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [showNotes, setShowNotes] = useState(false)
 
   // Paginación
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(10)
   const [currentPage, setCurrentPage] = useState(1)
 
   // Consulta ARCA
@@ -121,26 +131,30 @@ export default function ClientesPage() {
     }
   }
 
-  const loadClients = async (isMounted?: () => boolean) => {
+  const fetchClients = useCallback(async () => {
+    setLoading(true)
     try {
-      const data = await clientsApi.getAll()
-      if (isMounted && !isMounted()) return
-      setClients(data)
-    } catch (error) {
-      if (isMounted && !isMounted()) return
-      // Error silenciado
+      const result = await clientsApi.getPaginated(pageSize, currentPage - 1, {
+        search: searchQuery || undefined,
+        taxCategory: categoryFilter !== 'all' ? categoryFilter : undefined,
+        hasDebt: debtFilter !== 'all' ? (debtFilter as 'with' | 'without') : undefined,
+      })
+      setClients(result.data)
+      setTotalCount(result.count)
+    } catch {
       toast.error('Error al cargar los clientes')
     } finally {
-      if (isMounted && !isMounted()) return
       setLoading(false)
     }
-  }
+  }, [pageSize, currentPage, searchQuery, categoryFilter, debtFilter])
 
   useEffect(() => {
-    let mounted = true
-    loadClients(() => mounted)
-    return () => { mounted = false }
-  }, [])
+    fetchClients()
+  }, [fetchClients])
+
+  const loadClients = async () => {
+    await fetchClients()
+  }
 
   const handleCreate = () => {
     setEditingClient(null)
@@ -161,15 +175,14 @@ export default function ClientesPage() {
   const handleSave = async (clientData: Omit<Client, 'id' | 'createdAt' | 'currentBalance'>) => {
     try {
       if (editingClient) {
-        const updated = await clientsApi.update(editingClient.id, clientData)
-        setClients(clients.map(c => c.id === editingClient.id ? updated : c))
+        await clientsApi.update(editingClient.id, clientData)
         toast.success('Cliente actualizado correctamente')
       } else {
-        const newClient = await clientsApi.create(clientData)
-        setClients([newClient, ...clients])
+        await clientsApi.create(clientData)
         toast.success('Cliente creado correctamente')
       }
       setModalOpen(false)
+      await fetchClients()
     } catch (error) {
       // Error silenciado
       toast.error('Error al guardar el cliente')
@@ -192,8 +205,6 @@ export default function ClientesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ clientId: paymentClient.id, amount, description: paymentDescription })
         })
-        // actualizar estado local
-        setClients(clients.map(c => c.id === paymentClient.id ? { ...c, currentBalance: Math.max((c.currentBalance || 0) - amount, 0) } : c))
         toast.success('Pago registrado correctamente')
       } else {
         // Sumar deuda (registro de tipo 'debt' en transacciones)
@@ -202,11 +213,10 @@ export default function ClientesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ clientId: paymentClient.id, amount, description: paymentDescription })
         })
-        setClients(clients.map(c => c.id === paymentClient.id ? { ...c, currentBalance: (c.currentBalance || 0) + amount } : c))
         toast.success('Deuda registrada correctamente')
       }
       setPaymentDialogOpen(false)
-      // recargar historial inmediatamente
+      await fetchClients()
       await loadPaymentHistory(paymentClient.id)
     } catch (e: any) {
       toast.error(e?.message || 'Error registrando el pago')
@@ -233,28 +243,12 @@ export default function ClientesPage() {
     }
   }
 
-  const filteredClients = clients.filter(client => {
-    const query = searchQuery.toLowerCase()
-    const queryDigits = normalizeCuit(searchQuery)
-    const cuitDigits = normalizeCuit(client.cuit)
-    const dniDigits = normalizeCuit(client.dni)
-    const matchesSearch =
-      (client.dni?.toLowerCase().includes(query) ?? false) ||
-      (client.cuit?.toLowerCase().includes(query) ?? false) ||
-      client.name.toLowerCase().includes(query) ||
-      (queryDigits.length > 0 && (cuitDigits.includes(queryDigits) || dniDigits.includes(queryDigits)))
-    const matchesCategory = categoryFilter === 'all' || client.taxCategory === categoryFilter
-    const matchesDebt = debtFilter === 'all' || (debtFilter === 'with' ? (client.currentBalance || 0) > 0 : (client.currentBalance || 0) === 0)
-    return matchesSearch && matchesCategory && matchesDebt
-  })
+  // Los clientes ya vienen filtrados y paginados del server
+  const pagedClients = clients
+  const totalPages = Math.ceil(totalCount / pageSize)
 
   // Reset to page 1 when filters change
-  useEffect(() => { setCurrentPage(1) }, [searchQuery, categoryFilter])
-
-  const pagedClients = useMemo(
-    () => filteredClients.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [filteredClients, currentPage, pageSize]
-  )
+  useEffect(() => { setCurrentPage(1) }, [searchQuery, categoryFilter, debtFilter])
 
   const formatTaxCategory = (category: Client['taxCategory']) => {
     switch (category) {
@@ -322,7 +316,7 @@ export default function ClientesPage() {
   }
 
   // Stats
-  const totalClients = clients.length
+  const totalClients = totalCount
   const totalDebt = clients.reduce((sum, c) => sum + (c.currentBalance || 0), 0)
   const clientsWithDebt = clients.filter(c => c.currentBalance > 0).length
 
@@ -377,8 +371,8 @@ export default function ClientesPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar por nombre, DNI o CUIT..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10 bg-background"
           />
         </div>
@@ -421,8 +415,8 @@ export default function ClientesPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar cliente..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10 bg-background"
           />
         </div>
@@ -461,7 +455,7 @@ export default function ClientesPage() {
       ) : (
         <>
           {/* Empty State */}
-          {filteredClients.length === 0 ? (
+          {totalCount === 0 ? (
             <Card className="border-dashed border-2">
               <CardContent className="flex flex-col items-center justify-center py-16">
                 <div className="rounded-full bg-primary/10 p-4 mb-4">
@@ -724,10 +718,10 @@ const usagePercent = (client.creditLimit || 0) > 0
                 })}
               </div>
               {/* Pagination controls */}
-              {filteredClients.length > pageSize && (
+              {totalCount > pageSize && (
                 <div className="flex items-center justify-between px-2 pb-6 md:pb-0 mt-4">
                   <p className="text-sm text-muted-foreground">
-                    Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filteredClients.length)} de {filteredClients.length}
+                    Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalCount)} de {totalCount}
                   </p>
                   <div className="flex items-center gap-2">
                     <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
@@ -737,8 +731,8 @@ const usagePercent = (client.creditLimit || 0) > 0
                       </SelectContent>
                     </Select>
                     <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Anterior</Button>
-                    <span className="text-sm text-muted-foreground">{currentPage}/{Math.ceil(filteredClients.length / pageSize)}</span>
-                    <Button variant="outline" size="sm" disabled={currentPage >= Math.ceil(filteredClients.length / pageSize)} onClick={() => setCurrentPage(p => p + 1)}>Siguiente</Button>
+                    <span className="text-sm text-muted-foreground">{currentPage}/{totalPages}</span>
+                    <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)}>Siguiente</Button>
                   </div>
                 </div>
               )}
