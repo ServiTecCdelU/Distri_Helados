@@ -140,6 +140,7 @@ function mapVentaRow(row: any): Venta {
     items,
     total: row.total,
     paymentType: row.payment_type,
+    paymentMethod: row.payment_method ?? undefined,
     cashAmount: row.cash_amount ?? undefined,
     creditAmount: row.credit_amount ?? undefined,
     createdAt: row.created_at,

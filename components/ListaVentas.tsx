@@ -464,7 +464,7 @@ export function ListaVentas({
                   <div className="text-right shrink-0">
                     <p className="font-bold text-foreground">{fmt(venta.total)}</p>
                     <Badge variant="outline" className={`text-[10px] mt-1 ${payBadgeCls(venta.paymentType)}`}>
-                      {payLabel(venta.paymentType, (venta as any).paymentMethod)}
+                      {payLabel(venta.paymentType, venta.paymentMethod)}
                     </Badge>
                     <Button variant="ghost" size="sm" className="h-7 mt-1 text-blue-600 px-2" onClick={() => onVerDetalle(venta)}>
                       <Eye className="h-3.5 w-3.5" />
@@ -481,8 +481,8 @@ export function ListaVentas({
                   <span className="w-20 shrink-0 text-xs font-semibold text-foreground text-right">{fmt(venta.total)}</span>
                   <div className="w-24 shrink-0 flex justify-center">
                     <Badge variant="outline" className={`gap-1 px-1.5 py-0 text-[10px] ${payBadgeCls(venta.paymentType)}`}>
-                      {payIcon(venta.paymentType, (venta as any).paymentMethod)}
-                      {payLabel(venta.paymentType, (venta as any).paymentMethod)}
+                      {payIcon(venta.paymentType, venta.paymentMethod)}
+                      {payLabel(venta.paymentType, venta.paymentMethod)}
                     </Badge>
                   </div>
                   <div className="w-8 shrink-0 flex justify-center">
