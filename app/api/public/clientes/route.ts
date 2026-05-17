@@ -88,37 +88,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ found: true, client: mapClient(foundClient) });
   }
 
-  // Si llegamos acá hay un query libre 'q' -> buscar server-side
+  // Si llegamos acá hay un query libre 'q' -> buscar server-side con ilike
   if (q) {
-    // Supabase: usar ilike para búsqueda parcial por nombre, email, cuit, dni, address
-    const { data: allClients } = await supabaseAdmin
+    const { data: matches } = await supabaseAdmin
       .from('clientes')
       .select('*')
-      .limit(500);
+      .or(`name.ilike.%${q}%,email.ilike.%${q}%,cuit.ilike.%${q}%,dni.ilike.%${q}%,phone.ilike.%${q}%,address.ilike.%${q}%`)
+      .limit(10);
 
-    if (!allClients || allClients.length === 0) return NextResponse.json({ found: false });
-
-    const normQ = normalizeForSearch(q);
-    const digitsQ = (q || "").replace(/[^0-9]/g, "");
-    const matches: any[] = [];
-
-    for (const row of allClients) {
-      const nName = normalizeForSearch(row.name || "");
-      const nEmail = normalizeForSearch(row.email || "");
-      const nAddr = normalizeForSearch(row.address || "");
-      const nDni = normalizeForSearch(row.dni || "");
-      const nCuit = normalizeForSearch(row.cuit || "");
-      let matched = false;
-      if (nName === normQ || nName.includes(normQ)) matched = true;
-      else if (nEmail && nEmail.includes(normQ)) matched = true;
-      else if (digitsQ && String(row.phone || "").replace(/[^0-9]/g, "").includes(digitsQ)) matched = true;
-      else if (nDni.includes(normQ) || nCuit.includes(normQ)) matched = true;
-      else if (nAddr.includes(normQ)) matched = true;
-      if (matched) matches.push(row);
-      if (matches.length >= 10) break;
-    }
-
-    if (matches.length === 0) return NextResponse.json({ found: false });
+    if (!matches || matches.length === 0) return NextResponse.json({ found: false });
 
     return NextResponse.json({
       found: true,
