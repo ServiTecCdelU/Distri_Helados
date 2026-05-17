@@ -1,7 +1,7 @@
 // app/ventas/nueva/page.tsx
 "use client";
 
-import { useState, useMemo, memo, useEffect, Suspense } from "react";
+import { useState, useMemo, memo, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MainLayout } from "@/components/layout/main-layout";
 import { PageHeader } from "@/components/layout/page-header";
@@ -36,6 +36,13 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useCart } from "@/hooks/useCart";
 import type { UserRole } from "@/hooks/useCart";
 import { UnifiedCart } from "@/components/cart/UnifiedCart";
@@ -87,11 +94,24 @@ function NuevaVentaContent({
   const searchParams = useSearchParams();
   const { state, actions } = useCart(cartRole, userEmail);
 
+  const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { setSearchQuery(value); setCurrentPage(1); }, 400);
+  };
+
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [showDisabled, setShowDisabled] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [cartDialogOpen, setCartDialogOpen] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+
+  // Paginación
+  const pageSize = 10;
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Abrir carrito automáticamente si viene desde tienda (?openCart=true)
   useEffect(() => {
@@ -100,7 +120,16 @@ function NuevaVentaContent({
     }
   }, [searchParams, state.cart.length]);
 
-  const { enabledProducts, disabledProducts } = useMemo(() => {
+  // Categorías únicas para el filtro
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const p of state.products) {
+      if (p.category && !(p as any).disabled) cats.add(p.category);
+    }
+    return Array.from(cats).sort();
+  }, [state.products]);
+
+  const { enabledProducts, disabledProducts, totalEnabled } = useMemo(() => {
     const query = searchQuery.toLowerCase();
     const enabled: typeof state.products = [];
     const disabled: typeof state.products = [];
@@ -110,14 +139,26 @@ function NuevaVentaContent({
         product.name.toLowerCase().includes(query) ||
         product.category.toLowerCase().includes(query);
       if (!matchesSearch) continue;
+      const matchesCategory = categoryFilter === "all" || product.category === categoryFilter;
+      if (!matchesCategory) continue;
       if ((product as any).disabled) {
         if (showDisabled) disabled.push(product);
       } else {
         enabled.push(product);
       }
     }
-    return { enabledProducts: enabled, disabledProducts: disabled };
-  }, [state.products, searchQuery, showDisabled]);
+    return { enabledProducts: enabled, disabledProducts: disabled, totalEnabled: enabled.length };
+  }, [state.products, searchQuery, showDisabled, categoryFilter]);
+
+  // Paginación sobre productos habilitados
+  const totalPages = Math.ceil(totalEnabled / pageSize);
+  const pagedEnabledProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return enabledProducts.slice(start, start + pageSize);
+  }, [enabledProducts, currentPage]);
+
+  // Reset página al cambiar filtros
+  useEffect(() => { setCurrentPage(1); }, [categoryFilter, searchQuery]);
 
   const filteredProducts = enabledProducts.length + disabledProducts.length > 0;
 
@@ -241,19 +282,32 @@ function NuevaVentaContent({
           }
         />
 
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Buscar productos..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 pr-10 h-11 text-sm rounded-xl border-2 focus-visible:ring-2"
-          />
-          {searchQuery && (
-            <Button variant="ghost" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7" onClick={() => setSearchQuery("")}>
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar productos..."
+              value={searchInput}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="pl-10 pr-10 h-11 text-sm rounded-xl border-2 focus-visible:ring-2"
+            />
+            {searchInput && (
+              <Button variant="ghost" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7" onClick={() => { setSearchInput(""); setSearchQuery(""); setCurrentPage(1); }}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v)}>
+            <SelectTrigger className="w-40 h-11 rounded-xl border-2">
+              <SelectValue placeholder="Rubro" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los rubros</SelectItem>
+              {categories.map(cat => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {state.loading ? (
@@ -269,19 +323,34 @@ function NuevaVentaContent({
             </div>
             <h3 className="text-lg font-semibold text-foreground mb-1">No se encontraron productos</h3>
             <p className="text-sm text-muted-foreground">
-              {searchQuery ? `No hay productos que coincidan con "${searchQuery}"` : "No hay productos disponibles"}
+              {searchInput ? `No hay productos que coincidan con "${searchInput}"` : "No hay productos disponibles"}
             </p>
           </div>
         ) : (
           <div className="space-y-6">
             {enabledProducts.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <div className="h-1 flex-1 bg-gradient-to-r from-primary/20 to-transparent rounded" />
-                  <span>Habilitados</span>
-                  <div className="h-1 flex-1 bg-gradient-to-l from-primary/20 to-transparent rounded" />
-                </h3>
-                <ProductGrid products={enabledProducts} cart={state.cart} addToCart={actions.addToCart} formatCurrency={actions.formatCurrency} viewMode={viewMode} />
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <span>{totalEnabled} productos</span>
+                    {categoryFilter !== "all" && <Badge variant="secondary" className="text-[10px]">{categoryFilter}</Badge>}
+                  </h3>
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Ant.</Button>
+                      <span className="text-xs text-muted-foreground">{currentPage}/{totalPages}</span>
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)}>Sig.</Button>
+                    </div>
+                  )}
+                </div>
+                <ProductGrid products={pagedEnabledProducts} cart={state.cart} addToCart={actions.addToCart} formatCurrency={actions.formatCurrency} viewMode={viewMode} />
+                {totalPages > 1 && (
+                  <div className="flex justify-center mt-3">
+                    <p className="text-xs text-muted-foreground">
+                      Mostrando {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalEnabled)} de {totalEnabled}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {showDisabled && disabledProducts.length > 0 && (

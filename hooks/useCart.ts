@@ -6,6 +6,7 @@ import { productsApi, clientsApi, salesApi, sellersApi, ordersApi } from "@/lib/
 import type { Product, Client, CartItem, Seller, City } from "@/lib/types";
 import { toast } from "sonner";
 import { formatCurrency, normalizeCuit } from "@/lib/utils/format";
+import { getCached, setCache } from "@/lib/query-cache";
 
 export type UserRole = "admin" | "seller" | null;
 
@@ -263,15 +264,26 @@ export function useCart(role: UserRole, userEmail?: string) {
 
   // --- Load data ---
   const loadData = useCallback(async () => {
+    const cacheKey = `cart-data:${role}`;
+    const cached = getCached<{ products: Product[]; clients: Client[]; sellers: Seller[] }>(cacheKey, 60_000);
+    if (cached) {
+      setProducts(cached.products);
+      setClients(cached.clients);
+      setSellers(cached.sellers);
+      setLoading(false);
+      return;
+    }
     try {
       if (role === null) {
         // Public/customer: use public API
         const response = await fetch("/api/public/productos");
         if (!response.ok) throw new Error("Error cargando productos");
         const data = await response.json();
-        setProducts(data.products || []);
+        const prods = data.products || [];
+        setProducts(prods);
         setClients([]);
         setSellers([]);
+        setCache(cacheKey, { products: prods, clients: [], sellers: [] });
       } else {
         // Admin/seller: load everything
         const [productsData, clientsData, sellersData] = await Promise.all([
@@ -279,9 +291,11 @@ export function useCart(role: UserRole, userEmail?: string) {
           clientsApi.getAll(),
           sellersApi.getAll(),
         ]);
+        const activeSellers = sellersData.filter((s) => s.isActive);
         setProducts(productsData);
         setClients(clientsData);
-        setSellers(sellersData.filter((s) => s.isActive));
+        setSellers(activeSellers);
+        setCache(cacheKey, { products: productsData, clients: clientsData, sellers: activeSellers });
       }
     } catch (error) {
       // Error silenciado
