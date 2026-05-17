@@ -269,57 +269,48 @@ export default function CuentaCorrientePage() {
         ) : (
           <>
             {/* Lista de clientes */}
-            <div className="space-y-2">
+            <div className="space-y-1">
               {clients.map((client) => (
-                <Card key={client.id} className="hover:shadow-sm transition-shadow">
-                  <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{client.name}</p>
-                        {client.currentBalance > 0 && (
-                          <Badge variant="destructive" className="text-xs shrink-0">
-                            Debe
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground truncate">
-                        {client.cuit || client.phone || client.email || "Sin datos"}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Saldo</p>
-                        <p
-                          className={`font-bold ${
-                            client.currentBalance > 0
-                              ? "text-red-600"
-                              : "text-green-600"
-                          }`}
-                        >
-                          {formatCurrency(client.currentBalance)}
-                        </p>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleViewTransactions(client)}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          Ver
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="default"
-                          onClick={() => handleOpenPayment(client)}
-                        >
-                          <DollarSign className="h-4 w-4 mr-1" />
-                          Pago
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div
+                  key={client.id}
+                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{client.name}</p>
+                    {client.currentBalance > 0 && (
+                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0 shrink-0">
+                        Debe
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <p
+                      className={`text-sm font-bold ${
+                        client.currentBalance > 0
+                          ? "text-red-600"
+                          : "text-green-600"
+                      }`}
+                    >
+                      {formatCurrency(client.currentBalance)}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={() => handleViewTransactions(client)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={() => handleOpenPayment(client)}
+                    >
+                      <DollarSign className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
               ))}
             </div>
 
