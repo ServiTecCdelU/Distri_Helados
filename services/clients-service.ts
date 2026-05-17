@@ -200,3 +200,38 @@ export const getClientTransactions = async (clientId: string): Promise<Transacti
     saleId: r.sale_id,
   }))
 }
+
+export interface TransactionWithSale extends Transaction {
+  saleNumber?: string
+  remitoNumber?: string
+  saleTotal?: number
+  saleItems?: { name: string; quantity: number; price: number }[]
+  saleDate?: Date
+}
+
+export const getClientTransactionsWithSales = async (clientId: string): Promise<TransactionWithSale[]> => {
+  const { data, error } = await supabase
+    .from('transacciones')
+    .select('*, ventas(id, sale_number, remito_number, total, created_at, venta_items(name, quantity, price))')
+    .eq('client_id', clientId)
+    .order('date', { ascending: false })
+  if (error) throw error
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    clientId: r.client_id,
+    type: r.type,
+    amount: r.amount,
+    description: r.description,
+    date: new Date(r.date),
+    saleId: r.sale_id,
+    saleNumber: r.ventas?.sale_number,
+    remitoNumber: r.ventas?.remito_number,
+    saleTotal: r.ventas?.total,
+    saleItems: r.ventas?.venta_items?.map((i: any) => ({
+      name: i.name,
+      quantity: i.quantity,
+      price: i.price,
+    })),
+    saleDate: r.ventas?.created_at ? new Date(r.ventas.created_at) : undefined,
+  }))
+}

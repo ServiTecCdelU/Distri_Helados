@@ -20,6 +20,7 @@ import {
   Banknote,
   Shield,
   Tag,
+  Wallet,
 } from "lucide-react";
 import { useState } from "react";
 import Image from "next/image";
@@ -53,6 +54,7 @@ export function AppSidebar() {
     { href: "/ventas/nueva", label: "Nueva Venta", icon: ShoppingCart, roles: ["admin", ...(isVendedor ? ["seller"] : [])] },
     { href: "/pedidos", label: "Pedidos", icon: Truck, roles: ["admin", ...(isTransportista ? ["seller"] : [])] },
     // { href: "/transporte", label: "Transporte", icon: MapPin, roles: ["admin", ...(isTransportista ? ["seller"] : [])] },
+    { href: "/cuenta-corriente", label: "Cuenta Corriente", icon: Wallet, roles: ["admin"] },
     { href: "/comisiones", label: "Mis Comisiones", icon: Banknote, roles: ["seller"] },
     { href: "/caja", label: "Caja Diaria", icon: Banknote, roles: ["admin"] },
     // { href: "/reportes", label: "Reportes", icon: BarChart3, roles: ["admin"] },

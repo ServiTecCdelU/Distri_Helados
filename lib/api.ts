@@ -13,11 +13,12 @@ import {
   deleteClient,
   getClientById,
   getClientTransactions,
+  getClientTransactionsWithSales,
   getClients,
   getClientsPaginated,
   updateClient,
 } from '@/services/clients-service'
-import type { ClientFilters } from '@/services/clients-service'
+import type { ClientFilters, TransactionWithSale } from '@/services/clients-service'
 import {
   getSales,
   getSalesPaginated,
@@ -124,6 +125,9 @@ export const clientsApi = {
   },
   async getTransactions(clientId: string): Promise<Transaction[]> {
     return getClientTransactions(clientId)
+  },
+  async getTransactionsWithSales(clientId: string): Promise<TransactionWithSale[]> {
+    return getClientTransactionsWithSales(clientId)
   },
 }
 
