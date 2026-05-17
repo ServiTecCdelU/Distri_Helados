@@ -144,20 +144,43 @@ export const deleteClient = async (id: string): Promise<void> => {
   if (error) throw error
 }
 
+export interface ClientFilters {
+  search?: string
+  taxCategory?: string
+  hasDebt?: 'all' | 'with' | 'without'
+}
+
 export const getClientsPaginated = async (
-  pageSize: number = 50,
+  pageSize: number = 10,
   page: number = 0,
-): Promise<{ data: Client[]; page: number; hasMore: boolean }> => {
+  filters: ClientFilters = {},
+): Promise<{ data: Client[]; count: number; page: number; pageSize: number; hasMore: boolean }> => {
   const from = page * pageSize
   const to = from + pageSize - 1
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('clientes')
-    .select('*, cliente_direcciones(*)')
+    .select('*, cliente_direcciones(*)', { count: 'exact' })
     .order('created_at', { ascending: false })
-    .range(from, to)
+
+  if (filters.search) {
+    query = query.or(`name.ilike.%${filters.search}%,dni.ilike.%${filters.search}%,cuit.ilike.%${filters.search}%,phone.ilike.%${filters.search}%`)
+  }
+  if (filters.taxCategory && filters.taxCategory !== 'all') {
+    query = query.eq('tax_category', filters.taxCategory)
+  }
+  if (filters.hasDebt === 'with') {
+    query = query.gt('current_balance', 0)
+  } else if (filters.hasDebt === 'without') {
+    query = query.lte('current_balance', 0)
+  }
+
+  query = query.range(from, to)
+
+  const { data, error, count } = await query
   if (error) throw error
   const rows = (data || []).map(mapRow)
-  return { data: rows, page, hasMore: rows.length === pageSize }
+  return { data: rows, count: count ?? 0, page, pageSize, hasMore: rows.length === pageSize }
 }
 
 export const getClientTransactions = async (clientId: string): Promise<Transaction[]> => {

@@ -87,18 +87,57 @@ export const deleteProduct = async (id: string): Promise<void> => {
   if (error) throw error
 }
 
+export interface ProductFilters {
+  search?: string
+  category?: string
+  marca?: string
+  stockFilter?: 'all' | 'available' | 'low' | 'out'
+  sinTacc?: boolean | null
+  disabled?: boolean | null
+}
+
 export const getProductsPaginated = async (
-  pageSize: number = 50,
+  pageSize: number = 10,
   page: number = 0,
-): Promise<{ data: Product[]; page: number; hasMore: boolean }> => {
+  filters: ProductFilters = {},
+): Promise<{ data: Product[]; count: number; page: number; pageSize: number; hasMore: boolean }> => {
   const from = page * pageSize
   const to = from + pageSize - 1
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('productos')
-    .select('*')
+    .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
-    .range(from, to)
+
+  if (filters.search) {
+    query = query.or(`name.ilike.%${filters.search}%,description.ilike.%${filters.search}%,category.ilike.%${filters.search}%`)
+  }
+  if (filters.category && filters.category !== 'all') {
+    query = query.eq('category', filters.category)
+  }
+  if (filters.marca && filters.marca !== 'all') {
+    query = query.eq('marca', filters.marca)
+  }
+  if (filters.stockFilter === 'available') {
+    query = query.gt('stock', 0)
+  } else if (filters.stockFilter === 'low') {
+    query = query.gt('stock', 0).lt('stock', 10)
+  } else if (filters.stockFilter === 'out') {
+    query = query.lte('stock', 0)
+  }
+  if (filters.sinTacc === true) {
+    query = query.eq('sin_tacc', true)
+  }
+  if (filters.disabled === true) {
+    query = query.eq('disabled', true)
+  } else if (filters.disabled === false) {
+    query = query.or('disabled.is.null,disabled.eq.false')
+  }
+
+  query = query.range(from, to)
+
+  const { data, error, count } = await query
   if (error) throw error
   const rows = (data || []).map(mapRow)
-  return { data: rows, page, hasMore: rows.length === pageSize }
+  return { data: rows, count: count ?? 0, page, pageSize, hasMore: rows.length === pageSize }
 }

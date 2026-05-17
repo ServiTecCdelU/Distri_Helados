@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { MainLayout } from "@/components/layout/main-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -117,17 +116,28 @@ export interface InventorySnapshot {
 }
 
 export default function ProductosPage() {
-  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Cache de todos los productos para CSV/remito (carga lazy)
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const allProductsLoadedRef = useRef(false);
+  const loadAllProducts = useCallback(async () => {
+    if (allProductsLoadedRef.current && allProducts.length > 0) return allProducts;
+    const data = await productsApi.getAll();
+    setAllProducts(data);
+    allProductsLoadedRef.current = true;
+    return data;
+  }, [allProducts]);
+
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setSearchQuery(value), 300);
+    debounceRef.current = setTimeout(() => setSearchQuery(value), 400);
   };
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -162,53 +172,55 @@ export default function ProductosPage() {
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
 
-  useEffect(() => {
-    let mounted = true;
-    const doLoad = async () => {
-      try {
-        const data = await productsApi.getAll();
-        if (!mounted) return;
-        setProducts(data);
-      } catch (error) {
-        if (!mounted) return;
-        // Error silenciado
-      } finally {
-        if (!mounted) return;
-        setLoading(false);
-      }
-    };
-    doLoad();
-    loadStockHistory();
-    loadInventoryHistory();
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
-    if (products.length > 0 && !loading) {
-      saveInventorySnapshot();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products.length, loading]);
-
-  const loadProducts = async () => {
+  // Fetch paginado con filtros server-side
+  const fetchProducts = useCallback(async () => {
+    setLoading(true);
     try {
-      const data = await productsApi.getAll();
-      setProducts(data);
-    } catch (error) {
+      const result = await productsApi.getPaginated(pageSize, currentPage - 1, {
+        search: searchQuery || undefined,
+        category: categoryFilter !== "all" ? categoryFilter : undefined,
+        marca: marcaFilter !== "all" ? marcaFilter : undefined,
+        stockFilter: stockFilter !== "all" ? stockFilter : undefined,
+        sinTacc: sinTaccFilter === "sin-tacc" ? true : sinTaccFilter === "con-tacc" ? false : null,
+        disabled: null,
+      });
+      setProducts(result.data);
+      setTotalCount(result.count);
+    } catch {
       // Error silenciado
     } finally {
       setLoading(false);
     }
+  }, [pageSize, currentPage, searchQuery, categoryFilter, marcaFilter, stockFilter, sinTaccFilter]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  useEffect(() => {
+    loadStockHistory();
+    loadInventoryHistory();
+  }, []);
+
+  // Invalidar cache de allProducts cuando se modifica algo
+  const invalidateAllProducts = () => {
+    allProductsLoadedRef.current = false;
+  };
+
+  const loadProducts = async () => {
+    await fetchProducts();
+    invalidateAllProducts();
   };
 
   // --- CSV: Descargar planilla ---
-  const descargarPlanilla = () => {
-    if (products.length === 0) { toast.error("No hay productos"); return; }
+  const descargarPlanilla = async () => {
+    const all = await loadAllProducts();
+    if (all.length === 0) { toast.error("No hay productos"); return; }
     const SEP = ";";
     const header = ["ID", "Nombre", "Precio", "Stock"].join(SEP);
-    const rows = products
+    const rows = all
       .filter((p) => !(p as any).disabled)
       .map((p) => {
         const name = p.name.replace(/"/g, "'");
@@ -233,6 +245,7 @@ export default function ProductosPage() {
     const toastId = "import-csv";
     toast.loading("Procesando planilla...", { id: toastId });
     try {
+      const all = await loadAllProducts();
       const text = await file.text();
       const lines = text.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("sep="));
       if (lines.length < 2) throw new Error("El archivo está vacío");
@@ -262,7 +275,7 @@ export default function ProductosPage() {
         const [id, , newPriceStr, newStockStr] = parts;
         if (!id) continue;
 
-        const product = products.find((p) => p.id === id);
+        const product = all.find((p) => p.id === id);
         if (!product) { errors.push(`ID "${id}" no encontrado`); continue; }
 
         const newPrice = newPriceStr ? parseFloat(newPriceStr.replace(",", ".")) : NaN;
@@ -325,18 +338,19 @@ export default function ProductosPage() {
     }
   };
 
-  const saveInventorySnapshot = () => {
-    const totalValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
-    const lowStockCount = products.filter(
+  const saveInventorySnapshot = async () => {
+    const all = await loadAllProducts();
+    const totalValue = all.reduce((sum, p) => sum + p.price * p.stock, 0);
+    const lowStockCount = all.filter(
       (p) => p.stock > 0 && p.stock < 10,
     ).length;
-    const outOfStockCount = products.filter((p) => p.stock === 0).length;
+    const outOfStockCount = all.filter((p) => p.stock === 0).length;
 
     const newSnapshot: InventorySnapshot = {
       id: Date.now().toString(),
       date: new Date(),
       totalValue,
-      productCount: products.length,
+      productCount: all.length,
       lowStockCount,
       outOfStockCount,
     };
@@ -454,7 +468,7 @@ export default function ProductosPage() {
     updates: { productId: string; newStock: number; productName: string }[],
   ) => {
     for (const update of updates) {
-      const product = products.find((p) => p.id === update.productId);
+      const product = allProducts.find((p) => p.id === update.productId);
       if (!product) continue;
 
       await productsApi.update(update.productId, { stock: update.newStock } as any);
@@ -473,8 +487,7 @@ export default function ProductosPage() {
     }
 
     // Recargar productos
-    const refreshed = await productsApi.getAll();
-    setProducts(refreshed);
+    await loadProducts();
   };
 
   const handleEdit = (product: Product) => {
@@ -495,10 +508,8 @@ export default function ProductosPage() {
         disabled: false,
       } as any);
 
-      setProducts((prev) =>
-        prev.map((p) => (p.id === product.id ? { ...p, disabled: false } : p)),
-      );
-
+      await fetchProducts();
+      invalidateAllProducts();
       toast.success(`"${product.name}" habilitado`);
     } catch (error) {
       // Error silenciado
@@ -511,21 +522,14 @@ export default function ProductosPage() {
     if (!productToDeactivate) return;
 
     try {
-      // Log del movimiento
       logDisableMovement(productToDeactivate, "Deshabilitado manualmente");
 
-      // Actualizar en Firebase (solo lo necesario)
       await productsApi.update(productToDeactivate.id, {
         disabled: true,
       } as any);
 
-      // Actualizar estado local
-      setProducts((prev) =>
-        prev.map((p) =>
-          p.id === productToDeactivate.id ? { ...p, disabled: true } : p,
-        ),
-      );
-
+      await fetchProducts();
+      invalidateAllProducts();
       toast.success(`"${productToDeactivate.name}" deshabilitado`);
     } catch (error) {
       // Error silenciado
@@ -559,13 +563,9 @@ export default function ProductosPage() {
         ),
       );
 
-      const updatedProducts = products.map((p) =>
-        selectedProducts.includes(p.id) ? { ...p, disabled: true } : p,
-      );
-
-      setProducts(updatedProducts);
       setSelectedProducts([]);
-
+      await fetchProducts();
+      invalidateAllProducts();
       toast.success(`${productsToDisable.length} productos deshabilitados`);
     } catch (error) {
       // Error silenciado
@@ -598,16 +598,9 @@ export default function ProductosPage() {
           }
         }
 
-        const updated = await productsApi.update(
-          editingProduct.id,
-          productData,
-        );
-        setProducts(
-          products.map((p) => (p.id === editingProduct.id ? updated : p)),
-        );
+        await productsApi.update(editingProduct.id, productData);
       } else {
         const newProduct = await productsApi.create(productData);
-        setProducts([...products, newProduct]);
 
         logStockMovement({
           productId: newProduct.id,
@@ -621,6 +614,7 @@ export default function ProductosPage() {
         });
       }
       setModalOpen(false);
+      await loadProducts();
     } catch (error) {
       // Error silenciado
     }
@@ -631,113 +625,42 @@ export default function ProductosPage() {
     setShowStockHistory(true);
   };
 
-  const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
-      const matchesSearch =
-        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (product.description || "").toLowerCase().includes(searchQuery.toLowerCase());
+  // Los productos ya vienen filtrados y paginados del server
+  const paginatedProducts = products;
+  const totalPages = Math.ceil(totalCount / pageSize);
 
-      const matchesCategory =
-        categoryFilter === "all" || product.category === categoryFilter;
-
-      let matchesPrice = true;
-      switch (priceFilter) {
-        case "0-2800":
-          matchesPrice = product.price <= 2800;
-          break;
-        case "2801-3000":
-          matchesPrice = product.price > 2800 && product.price <= 3000;
-          break;
-        case "3001-3200":
-          matchesPrice = product.price > 3000 && product.price <= 3200;
-          break;
-        case "3201+":
-          matchesPrice = product.price > 3200;
-          break;
-      }
-
-      const matchesBase =
-        marcaFilter === "all" || (product as any).marca === marcaFilter;
-
-      const matchesSinTacc =
-        sinTaccFilter === "all" ||
-        (sinTaccFilter === "sin-tacc" && (product as any).sinTacc === true) ||
-        (sinTaccFilter === "con-tacc" && (product as any).sinTacc !== true);
-
-      let matchesStock = true;
-      switch (stockFilter) {
-        case "available":
-          matchesStock = product.stock > 0;
-          break;
-        case "low":
-          matchesStock = product.stock > 0 && product.stock < 10;
-          break;
-        case "out":
-          matchesStock = product.stock === 0;
-          break;
-      }
-
-      return (
-        matchesSearch &&
-        matchesCategory &&
-        matchesPrice &&
-        matchesBase &&
-        matchesSinTacc &&
-        matchesStock
-      );
-    });
-  }, [
-    products,
-    searchQuery,
-    categoryFilter,
-    priceFilter,
-    marcaFilter,
-    sinTaccFilter,
-    stockFilter,
-  ]);
-
-  const stats = useMemo(() => {
-    const totalProducts = filteredProducts.length;
-    const totalInventoryValue = filteredProducts.reduce(
-      (sum, p) => sum + p.price * p.stock,
-      0,
-    );
-    const lowStockCount = filteredProducts.filter(
-      (p) => p.stock > 0 && p.stock < 10,
-    ).length;
-    const outOfStockCount = filteredProducts.filter(
-      (p) => p.stock === 0,
-    ).length;
-
-    return {
-      totalProducts,
-      totalInventoryValue,
-      lowStockCount,
-      outOfStockCount,
-    };
-  }, [filteredProducts]);
+  // Stats basadas en el count del server (total matcheado por filtros)
+  const stats = {
+    totalProducts: totalCount,
+    totalInventoryValue: products.reduce((sum, p) => sum + p.price * p.stock, 0),
+    lowStockCount: products.filter((p) => p.stock > 0 && p.stock < 10).length,
+    outOfStockCount: products.filter((p) => p.stock === 0).length,
+  };
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, categoryFilter, priceFilter, marcaFilter, stockFilter, sinTaccFilter]);
 
-  const paginatedProducts = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredProducts.slice(start, start + pageSize);
-  }, [filteredProducts, currentPage, pageSize]);
+  // Listas dinámicas para filtros y modal
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [availableMarcas, setAvailableMarcas] = useState<string[]>([]);
 
-  const totalPages = Math.ceil(filteredProducts.length / pageSize);
-
-  // Listas dinámicas para el modal (unión de defaults + valores reales en productos)
-  const availableCategories = useMemo(() => {
-    return products.map((p) => p.category).filter(Boolean);
-  }, [products]);
-
-  const availableMarcas = useMemo(() => {
-    return products.map((p) => (p as any).marca).filter(Boolean);
-  }, [products]);
+  useEffect(() => {
+    // Cargar categorías y marcas únicas para los filtros (query ligera)
+    const loadFilterOptions = async () => {
+      try {
+        const { data } = await (await import('@/lib/supabase')).supabase
+          .from('productos')
+          .select('category, marca')
+        if (data) {
+          setAvailableCategories([...new Set(data.map((r: any) => r.category).filter(Boolean))]);
+          setAvailableMarcas([...new Set(data.map((r: any) => r.marca).filter(Boolean))]);
+        }
+      } catch {}
+    };
+    loadFilterOptions();
+  }, []);
 
   const activeFilterCount = [
     categoryFilter !== "all",
@@ -766,10 +689,10 @@ export default function ProductosPage() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedProducts.length === filteredProducts.length) {
+    if (selectedProducts.length === products.length) {
       setSelectedProducts([]);
     } else {
-      setSelectedProducts(filteredProducts.map((p) => p.id));
+      setSelectedProducts(products.map((p) => p.id));
     }
   };
 
@@ -792,7 +715,7 @@ export default function ProductosPage() {
         details: `Copia de "${product.name}"`,
       });
 
-      setProducts([...products, newProduct]);
+      await loadProducts();
     } catch (error) {
       // Error silenciado
     }
@@ -890,7 +813,7 @@ export default function ProductosPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setRemitoImportOpen(true)}
+                onClick={() => { loadAllProducts(); setRemitoImportOpen(true); }}
                 className="gap-1 sm:gap-2 h-8 sm:h-9 px-2 sm:px-3"
               >
                 <FileUp className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -1223,7 +1146,7 @@ export default function ProductosPage() {
         )
       ) : (
         <>
-          {filteredProducts.length === 0 ? (
+          {totalCount === 0 ? (
             <div className="rounded-xl border-2 border-dashed border-border bg-card/50 p-8 sm:p-12 text-center">
               <div className="max-w-md mx-auto space-y-4">
                 <div className="h-12 w-12 sm:h-16 sm:w-16 rounded-full bg-muted flex items-center justify-center mx-auto">
@@ -1433,12 +1356,12 @@ export default function ProductosPage() {
                       onClick={toggleSelectAll}
                       className={cn(
                         "h-3.5 w-3.5 flex-shrink-0 rounded border flex items-center justify-center transition-colors",
-                        selectedProducts.length === filteredProducts.length && selectedProducts.length > 0
+                        selectedProducts.length === products.length && products.length > 0
                           ? "bg-primary border-primary text-primary-foreground"
                           : "bg-background border-border hover:border-primary",
                       )}
                     >
-                      {selectedProducts.length === filteredProducts.length && selectedProducts.length > 0 && (
+                      {selectedProducts.length === products.length && products.length > 0 && (
                         <Check className="h-2 w-2" />
                       )}
                     </button>
@@ -1534,7 +1457,7 @@ export default function ProductosPage() {
           )}
 
           {/* Paginación */}
-          {filteredProducts.length > 0 && (
+          {totalCount > 0 && (
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 pt-4 border-t border-border">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-muted-foreground">Mostrar:</span>
@@ -1557,9 +1480,9 @@ export default function ProductosPage() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">
-                  {Math.min((currentPage - 1) * pageSize + 1, filteredProducts.length)}–
-                  {Math.min(currentPage * pageSize, filteredProducts.length)} de{" "}
-                  {filteredProducts.length}
+                  {Math.min((currentPage - 1) * pageSize + 1, totalCount)}–
+                  {Math.min(currentPage * pageSize, totalCount)} de{" "}
+                  {totalCount}
                 </span>
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -1635,7 +1558,7 @@ export default function ProductosPage() {
       <RemitoImportModal
         open={remitoImportOpen}
         onClose={() => setRemitoImportOpen(false)}
-        products={products.filter((p) => !(p as any).disabled)}
+        products={allProducts.filter((p) => !(p as any).disabled)}
         onConfirm={handleRemitoConfirm}
       />
     </MainLayout>

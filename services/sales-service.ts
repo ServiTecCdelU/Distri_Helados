@@ -482,20 +482,51 @@ export const emitInvoice = async (saleId: string, clientData: any) => {
   return response.json()
 }
 
+export interface SaleFilters {
+  search?: string
+  sellerId?: string
+  clientId?: string
+  paymentType?: string
+  invoiceFilter?: string
+  remitoFilter?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
 export const getSalesPaginated = async (
-  pageSize: number = 50,
+  pageSize: number = 10,
   page: number = 0,
-): Promise<{ data: Sale[]; page: number; hasMore: boolean }> => {
+  filters: SaleFilters = {},
+): Promise<{ data: Sale[]; count: number; page: number; pageSize: number; hasMore: boolean }> => {
   const from = page * pageSize
   const to = from + pageSize - 1
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('ventas')
-    .select('*, venta_items(*)')
+    .select('*, venta_items(*)', { count: 'exact' })
     .order('created_at', { ascending: false })
-    .range(from, to)
+
+  if (filters.search) {
+    query = query.or(`client_name.ilike.%${filters.search}%,seller_name.ilike.%${filters.search}%,invoice_number.ilike.%${filters.search}%`)
+  }
+  if (filters.sellerId) query = query.eq('seller_id', filters.sellerId)
+  if (filters.clientId) query = query.eq('client_id', filters.clientId)
+  if (filters.paymentType && filters.paymentType !== 'all') {
+    query = query.eq('payment_type', filters.paymentType)
+  }
+  if (filters.invoiceFilter === 'emitted') query = query.eq('invoice_emitted', true)
+  if (filters.invoiceFilter === 'pending') query = query.or('invoice_emitted.is.null,invoice_emitted.eq.false')
+  if (filters.remitoFilter === 'emitted') query = query.not('remito_number', 'is', null)
+  if (filters.remitoFilter === 'pending') query = query.is('remito_number', null)
+  if (filters.dateFrom) query = query.gte('created_at', filters.dateFrom)
+  if (filters.dateTo) query = query.lte('created_at', new Date(filters.dateTo + 'T23:59:59').toISOString())
+
+  query = query.range(from, to)
+
+  const { data, error, count } = await query
   if (error) throw error
   const rows = (data || []).map(mapSale)
-  return { data: rows, page, hasMore: rows.length === pageSize }
+  return { data: rows, count: count ?? 0, page, pageSize, hasMore: rows.length === pageSize }
 }
 
 export const getSalesByDateRange = async (startDate: Date, endDate: Date): Promise<Sale[]> => {

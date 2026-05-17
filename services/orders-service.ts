@@ -224,18 +224,49 @@ export const createOrder = async (data: {
   return getOrderById(id)
 }
 
+export interface OrderFilters {
+  search?: string
+  status?: string
+  sellerId?: string
+  clientId?: string
+  city?: string
+  transportistaId?: string
+  dateFrom?: string
+  dateTo?: string
+}
+
 export const getOrdersPaginated = async (
-  pageSize: number = 50,
+  pageSize: number = 10,
   page: number = 0,
-): Promise<{ data: Order[]; page: number; hasMore: boolean }> => {
+  filters: OrderFilters = {},
+): Promise<{ data: Order[]; count: number; page: number; pageSize: number; hasMore: boolean }> => {
   const from = page * pageSize
   const to = from + pageSize - 1
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('pedidos')
-    .select(SELECT_WITH_ITEMS)
+    .select(SELECT_WITH_ITEMS, { count: 'exact' })
     .order('created_at', { ascending: false })
-    .range(from, to)
+
+  if (filters.search) {
+    query = query.or(`client_name.ilike.%${filters.search}%,seller_name.ilike.%${filters.search}%,id.ilike.%${filters.search}%`)
+  }
+  if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status)
+  if (filters.sellerId) query = query.eq('seller_id', filters.sellerId)
+  if (filters.clientId) query = query.eq('client_id', filters.clientId)
+  if (filters.city) query = query.eq('city', filters.city)
+  if (filters.transportistaId === 'unassigned') {
+    query = query.is('transportista_id', null)
+  } else if (filters.transportistaId) {
+    query = query.eq('transportista_id', filters.transportistaId)
+  }
+  if (filters.dateFrom) query = query.gte('created_at', filters.dateFrom)
+  if (filters.dateTo) query = query.lte('created_at', new Date(filters.dateTo + 'T23:59:59').toISOString())
+
+  query = query.range(from, to)
+
+  const { data, error, count } = await query
   if (error) throw error
   const rows = (data || []).map(mapOrder)
-  return { data: rows, page, hasMore: rows.length === pageSize }
+  return { data: rows, count: count ?? 0, page, pageSize, hasMore: rows.length === pageSize }
 }

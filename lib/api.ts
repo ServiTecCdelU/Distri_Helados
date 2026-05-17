@@ -7,6 +7,7 @@ import {
   getProductsPaginated,
   updateProduct,
 } from '@/services/products-service'
+import type { ProductFilters } from '@/services/products-service'
 import {
   createClient,
   deleteClient,
@@ -16,6 +17,7 @@ import {
   getClientsPaginated,
   updateClient,
 } from '@/services/clients-service'
+import type { ClientFilters } from '@/services/clients-service'
 import {
   getSales,
   getSalesPaginated,
@@ -26,6 +28,7 @@ import {
   saveBoletaToSale,
   saveRemitoToSale,
 } from '@/services/sales-service'
+import type { SaleFilters } from '@/services/sales-service'
 import { registerCashPayment } from '@/services/payments-service'
 import {
   createSeller,
@@ -53,6 +56,7 @@ import {
   saveBoletaToOrder,
   updateCheckedItems,
 } from '@/services/orders-service'
+import type { OrderFilters } from '@/services/orders-service'
 import { supabase } from '@/lib/supabase'
 import {
   getDashboardStats,
@@ -82,8 +86,8 @@ export const productsApi = {
   async getAll(): Promise<Product[]> {
     return getProducts()
   },
-  async getPaginated(pageSize?: number, lastDoc?: any) {
-    return getProductsPaginated(pageSize, lastDoc)
+  async getPaginated(pageSize?: number, page?: number, filters?: ProductFilters) {
+    return getProductsPaginated(pageSize ?? 10, page ?? 0, filters)
   },
   async getById(id: string): Promise<Product | undefined> {
     return getProductById(id)
@@ -103,8 +107,8 @@ export const clientsApi = {
   async getAll(): Promise<Client[]> {
     return getClients()
   },
-  async getPaginated(pageSize?: number, lastDoc?: any) {
-    return getClientsPaginated(pageSize, lastDoc)
+  async getPaginated(pageSize?: number, page?: number, filters?: ClientFilters) {
+    return getClientsPaginated(pageSize ?? 10, page ?? 0, filters)
   },
   async getById(id: string): Promise<Client | undefined> {
     return getClientById(id)
@@ -127,8 +131,8 @@ export const salesApi = {
   async getAll(): Promise<Sale[]> {
     return getSales()
   },
-  async getPaginated(pageSize?: number, lastDoc?: any) {
-    return getSalesPaginated(pageSize, lastDoc)
+  async getPaginated(pageSize?: number, page?: number, filters?: SaleFilters) {
+    return getSalesPaginated(pageSize ?? 10, page ?? 0, filters)
   },
   async getByDateRange(startDate: Date, endDate: Date) {
     return getSalesByDateRange(startDate, endDate)
@@ -207,8 +211,8 @@ export const ordersApi = {
   async getAll(): Promise<Order[]> {
     return getOrders()
   },
-  async getPaginated(pageSize?: number, lastDoc?: any) {
-    return getOrdersPaginated(pageSize, lastDoc)
+  async getPaginated(pageSize?: number, page?: number, filters?: OrderFilters) {
+    return getOrdersPaginated(pageSize ?? 10, page ?? 0, filters)
   },
   async getByTransportista(transportistaId: string): Promise<Order[]> {
     return getOrdersByTransportista(transportistaId)
