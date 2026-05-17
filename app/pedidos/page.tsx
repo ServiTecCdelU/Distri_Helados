@@ -435,13 +435,21 @@ export default function PedidosPage() {
     if (newStatus === "completed") {
       const order = orders.find((o) => o.id === orderId);
       if (order) {
-        // React 18 batchea múltiples setState — no hace falta setTimeout
         setActiveModal(null);
         setDetailOrder(null);
         setSelectedOrder(order);
         setActiveModal("payment");
       }
       return;
+    }
+
+    // No se puede avanzar a reparto sin transportista asignado
+    if (newStatus === "delivery") {
+      const order = orders.find((o) => o.id === orderId);
+      if (order && !order.transportistaId) {
+        toast.error("Asigná un transportista antes de enviar a reparto");
+        return;
+      }
     }
 
     try {
@@ -462,8 +470,8 @@ export default function PedidosPage() {
     try {
       const total = calculateOrderTotal(selectedOrder);
 
-      // ✅ Siempre usar el clientId del pedido, sin importar el método de pago
-      const resolvedClientId = selectedClientId || selectedOrder.clientId;
+      // ✅ Si el pedido tiene cliente, usarlo siempre (no se puede cambiar)
+      const resolvedClientId = selectedOrder.clientId || selectedClientId;
       const client = clients.find((c) => c.id === resolvedClientId);
 
       if (

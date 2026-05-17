@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { statusConfig } from "@/lib/order-constants";
 import { cn } from "@/lib/utils";
 import { RouteMapModal } from "@/components/pedidos/route-map-modal";
@@ -894,13 +895,18 @@ export default function TransportePage() {
   );
 
   const handleMarkDelivery = useCallback(async (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (order && !order.transportistaId) {
+      toast.error("Asigná un transportista antes de enviar a reparto");
+      return;
+    }
     try {
       const updated = await ordersApi.updateStatus(orderId, "delivery");
       setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
     } catch (err) {
       // Error silenciado
     }
-  }, []);
+  }, [orders]);
 
   const handleAssignSelf = useCallback(
     async (orderId: string) => {
