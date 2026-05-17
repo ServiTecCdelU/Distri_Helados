@@ -275,8 +275,18 @@ export default function CuentaCorrientePage() {
                   key={client.id}
                   className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border hover:bg-muted/50 transition-colors"
                 >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <p className="text-sm font-medium truncate">{client.name}</p>
+                    {client.cuit && (
+                      <span className="text-xs text-muted-foreground hidden sm:inline">
+                        CUIT: {client.cuit}
+                      </span>
+                    )}
+                    {client.phone && (
+                      <span className="text-xs text-muted-foreground hidden md:inline">
+                        Tel: {client.phone}
+                      </span>
+                    )}
                     {client.currentBalance > 0 && (
                       <Badge variant="destructive" className="text-[10px] px-1.5 py-0 shrink-0">
                         Debe
@@ -532,6 +542,7 @@ function ClientDetailPanel({
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {formatDate(tx.date)}
+                        {tx.sellerName && ` · ${tx.sellerName}`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
@@ -552,10 +563,17 @@ function ClientDetailPanel({
                   {/* Detalle expandido (items del remito/venta) */}
                   {expandedTx === tx.id && tx.saleItems && tx.saleItems.length > 0 && (
                     <div className="border-t bg-muted/30 p-3">
-                      <p className="text-xs font-medium text-muted-foreground mb-2">
-                        Detalle de la venta
-                        {tx.remitoNumber && ` (Remito ${tx.remitoNumber})`}
-                      </p>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Detalle de la venta
+                          {tx.remitoNumber && ` (Remito ${tx.remitoNumber})`}
+                        </p>
+                        {tx.sellerName && (
+                          <span className="text-xs text-muted-foreground">
+                            Vendedor: <span className="font-medium">{tx.sellerName}</span>
+                          </span>
+                        )}
+                      </div>
                       <div className="space-y-1">
                         {tx.saleItems.map((item, idx) => (
                           <div

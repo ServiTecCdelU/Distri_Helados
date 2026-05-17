@@ -207,12 +207,13 @@ export interface TransactionWithSale extends Transaction {
   saleTotal?: number
   saleItems?: { name: string; quantity: number; price: number }[]
   saleDate?: Date
+  sellerName?: string
 }
 
 export const getClientTransactionsWithSales = async (clientId: string): Promise<TransactionWithSale[]> => {
   const { data, error } = await supabase
     .from('transacciones')
-    .select('*, ventas(id, sale_number, remito_number, total, created_at, venta_items(name, quantity, price))')
+    .select('*, ventas(id, sale_number, remito_number, total, seller_name, created_at, venta_items(name, quantity, price))')
     .eq('client_id', clientId)
     .order('date', { ascending: false })
   if (error) throw error
@@ -233,5 +234,6 @@ export const getClientTransactionsWithSales = async (clientId: string): Promise<
       price: i.price,
     })),
     saleDate: r.ventas?.created_at ? new Date(r.ventas.created_at) : undefined,
+    sellerName: r.ventas?.seller_name,
   }))
 }
