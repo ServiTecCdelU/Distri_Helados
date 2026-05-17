@@ -31,7 +31,7 @@ import { salesApi, auditApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import type { Sale } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
-import { generateReadableId } from "@/services/supabase-helpers";
+import { generateReadableId, toDate } from "@/services/supabase-helpers";
 import { formatCurrency, formatTime } from "@/lib/utils/format";
 
 interface CashRegister {
