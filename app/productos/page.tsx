@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import { getCached, setCache, invalidateCache } from "@/lib/query-cache";
 import { MainLayout } from "@/components/layout/main-layout";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -174,8 +175,18 @@ export default function ProductosPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Fetch paginado con filtros server-side
-  const fetchProducts = useCallback(async () => {
+  // Fetch paginado con filtros server-side (con cache)
+  const fetchProducts = useCallback(async (skipCache = false) => {
+    const cacheKey = `productos:${pageSize}:${currentPage}:${searchQuery}:${categoryFilter}:${marcaFilter}:${stockFilter}:${sinTaccFilter}`;
+    if (!skipCache) {
+      const cached = getCached<{ data: any[]; count: number }>(cacheKey);
+      if (cached) {
+        setProducts(cached.data);
+        setTotalCount(cached.count);
+        setLoading(false);
+        return;
+      }
+    }
     setLoading(true);
     try {
       const result = await productsApi.getPaginated(pageSize, currentPage - 1, {
@@ -188,6 +199,7 @@ export default function ProductosPage() {
       });
       setProducts(result.data);
       setTotalCount(result.count);
+      setCache(cacheKey, { data: result.data, count: result.count });
     } catch {
       // Error silenciado
     } finally {
@@ -210,7 +222,8 @@ export default function ProductosPage() {
   };
 
   const loadProducts = async () => {
-    await fetchProducts();
+    invalidateCache('productos');
+    await fetchProducts(true);
     invalidateAllProducts();
   };
 
@@ -508,7 +521,8 @@ export default function ProductosPage() {
         disabled: false,
       } as any);
 
-      await fetchProducts();
+      invalidateCache('productos');
+      await fetchProducts(true);
       invalidateAllProducts();
       toast.success(`"${product.name}" habilitado`);
     } catch (error) {
@@ -528,7 +542,8 @@ export default function ProductosPage() {
         disabled: true,
       } as any);
 
-      await fetchProducts();
+      invalidateCache('productos');
+      await fetchProducts(true);
       invalidateAllProducts();
       toast.success(`"${productToDeactivate.name}" deshabilitado`);
     } catch (error) {
@@ -564,7 +579,8 @@ export default function ProductosPage() {
       );
 
       setSelectedProducts([]);
-      await fetchProducts();
+      invalidateCache('productos');
+      await fetchProducts(true);
       invalidateAllProducts();
       toast.success(`${productsToDisable.length} productos deshabilitados`);
     } catch (error) {

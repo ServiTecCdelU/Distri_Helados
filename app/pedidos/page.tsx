@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { getCached, setCache, invalidateCache } from "@/lib/query-cache";
 import { MainLayout } from "@/components/layout/main-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -138,11 +139,19 @@ export default function PedidosPage() {
     client?: Client;
   } | null>(null);
 
-  // Cargar pedidos con filtros server-side (sin limit, pedidos activos suelen ser pocos)
-  const fetchOrders = useCallback(async () => {
+  // Cargar pedidos con filtros server-side (con cache)
+  const fetchOrders = useCallback(async (skipCache = false) => {
+    const cacheKey = `pedidos:${searchQuery}:${filterStatus}:${filterSeller}:${filterClient}:${filterCity}:${filterTransportista}:${filterDateFrom}:${filterDateTo}`;
+    if (!skipCache) {
+      const cached = getCached<Order[]>(cacheKey);
+      if (cached) {
+        setOrders(cached);
+        setLoading(false);
+        return;
+      }
+    }
     try {
       setLoading(true);
-      // Pedidos activos (excluir completados) con filtros server-side
       const result = await ordersApi.getPaginated(200, 0, {
         search: searchQuery || undefined,
         status: filterStatus !== "all" ? filterStatus : undefined,
@@ -153,8 +162,9 @@ export default function PedidosPage() {
         dateFrom: filterDateFrom || undefined,
         dateTo: filterDateTo || undefined,
       });
-      // Filtrar completados client-side (más seguro)
-      setOrders(result.data.filter(o => o.status !== "completed"));
+      const filtered = result.data.filter(o => o.status !== "completed");
+      setOrders(filtered);
+      setCache(cacheKey, filtered);
     } catch {
       // silenciado
     } finally {
@@ -570,7 +580,8 @@ export default function PedidosPage() {
       });
 
       // Recargar pedidos del server
-      fetchOrders();
+      invalidateCache('pedidos');
+      fetchOrders(true);
 
       // React 18 batchea múltiples setState — no hace falta setTimeout
       setActiveModal("success");
@@ -803,7 +814,8 @@ export default function PedidosPage() {
           ordersApi.assignTransportista(id, transportista.id, transportista.name)
         )
       );
-      await fetchOrders();
+      invalidateCache('pedidos');
+      await fetchOrders(true);
       setSelectedOrderIds(new Set());
       setBulkTransportistaId("");
     } catch (e) {

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { savePdfToDatabase, downloadBase64Pdf } from "@/services/pdf-service";
 import { toast } from "sonner";
 import { formatCurrencyDecimals, formatDateTime } from "@/lib/utils/format";
+import { getCached, setCache, invalidateCache } from "@/lib/query-cache";
 
 // Helper para nombre de archivo: N°{numero}_{nombre_cliente}.pdf
 function buildDocFilename(tipo: "boleta" | "remito", numero: string | undefined, clientName?: string): string {
@@ -227,8 +228,18 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
     return {};
   };
 
-  // Cargar ventas con paginación y filtros server-side
-  const cargarVentas = useCallback(async () => {
+  // Cargar ventas con paginación y filtros server-side (con cache)
+  const cargarVentas = useCallback(async (skipCache = false) => {
+    const cacheKey = `ventas:${filterBySellerId}:${currentPage}:${pageSize}:${debouncedSearch}:${filtros.paymentFilter}:${filtros.invoiceFilter}:${filtros.remitoFilter}:${filtros.discountFilter}:${filtros.clientId}:${filtros.sellerId}:${filtros.deliveryFilter}:${filtros.periodFilter}:${filtros.dateFrom}:${filtros.dateTo}:${filtros.city}`;
+    if (!skipCache) {
+      const cached = getCached<{ data: Venta[]; count: number }>(cacheKey);
+      if (cached) {
+        setVentas(cached.data);
+        setTotalCount(cached.count);
+        setCargando(false);
+        return;
+      }
+    }
     try {
       setCargando(true);
       const from = (currentPage - 1) * pageSize;
@@ -299,6 +310,7 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
 
       setVentas(rows);
       setTotalCount(count ?? 0);
+      setCache(cacheKey, { data: rows, count: count ?? 0 });
     } catch {
       toast.error("Error al cargar ventas");
     } finally {
@@ -556,7 +568,8 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         toast.success("Remito generado correctamente", { id: toastId });
       }
 
-      await cargarVentas();
+      invalidateCache('ventas');
+      await cargarVentas(true);
       cerrarEmitir();
     } catch (error: any) {
       toast.error(`Error: ${error.message}`, { id: toastId });
@@ -653,7 +666,8 @@ export function useVentas(filterBySellerId?: string, clientCityMap?: Record<stri
         } as Venta : prev);
         toast.success("Remito generado correctamente", { id: toastId });
       }
-      await cargarVentas();
+      invalidateCache('ventas');
+      await cargarVentas(true);
     } catch (error: any) {
       toast.error(`Error: ${error.message}`, { id: toastId });
     } finally {

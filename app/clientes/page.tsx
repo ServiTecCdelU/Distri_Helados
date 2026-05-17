@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { getCached, setCache, invalidateCache } from '@/lib/query-cache'
 import { MainLayout } from '@/components/layout/main-layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -131,7 +132,17 @@ export default function ClientesPage() {
     }
   }
 
-  const fetchClients = useCallback(async () => {
+  const fetchClients = useCallback(async (skipCache = false) => {
+    const cacheKey = `clientes:${pageSize}:${currentPage}:${searchQuery}:${categoryFilter}:${debtFilter}`
+    if (!skipCache) {
+      const cached = getCached<{ data: any[]; count: number }>(cacheKey)
+      if (cached) {
+        setClients(cached.data)
+        setTotalCount(cached.count)
+        setLoading(false)
+        return
+      }
+    }
     setLoading(true)
     try {
       const result = await clientsApi.getPaginated(pageSize, currentPage - 1, {
@@ -141,6 +152,7 @@ export default function ClientesPage() {
       })
       setClients(result.data)
       setTotalCount(result.count)
+      setCache(cacheKey, { data: result.data, count: result.count })
     } catch {
       toast.error('Error al cargar los clientes')
     } finally {
@@ -182,7 +194,8 @@ export default function ClientesPage() {
         toast.success('Cliente creado correctamente')
       }
       setModalOpen(false)
-      await fetchClients()
+      invalidateCache('clientes')
+      await fetchClients(true)
     } catch (error) {
       // Error silenciado
       toast.error('Error al guardar el cliente')
@@ -216,7 +229,8 @@ export default function ClientesPage() {
         toast.success('Deuda registrada correctamente')
       }
       setPaymentDialogOpen(false)
-      await fetchClients()
+      invalidateCache('clientes')
+      await fetchClients(true)
       await loadPaymentHistory(paymentClient.id)
     } catch (e: any) {
       toast.error(e?.message || 'Error registrando el pago')
